@@ -22,27 +22,28 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <button id="settingsToggle" class="settings-toggle-floating" type="button" aria-label="Open user settings" title="User settings">Settings</button>
-    <button id="themeToggle" class="theme-toggle-floating" type="button" aria-label="Toggle light and dark theme" title="Toggle theme">◐</button>
     <div class="bg-shape bg-a"></div>
     <div class="bg-shape bg-b"></div>
     <main class="shell">
       <header class="hero">
-        <h1>Projection</h1>
+        <div class="header-toolbar">
+          <span class="app-name-pill">Projection</span>
+          <nav class="view-switcher panel compact-panel">
+            <button id="showHeatmapView" class="primary">Project overview</button>
+            <button id="showRoadmapView">Roadmap</button>
+            <button id="showProjectsView">Projects</button>
+            <button id="showPersonnelView">Personnel</button>
+            <button id="showPlanningView">Admin</button>
+            <button id="showMappingsView">Data Mapping</button>
+            <button id="showUserManagementView" class="hidden-view">User Management</button>
+          </nav>
+          <button id="settingsToggle" class="settings-toggle-inline" type="button" aria-label="Open user settings" title="User settings">Settings</button>
+          <button id="themeToggle" class="theme-toggle-inline" type="button" aria-label="Toggle light and dark theme" title="Toggle theme">◐</button>
+        </div>
         <div class="actions" id="accessRequestActions">
           <button id="requestDestroyerAccess" type="button" class="warn hidden-view">Request Destroyer Access</button>
         </div>
       </header>
-
-      <nav class="view-switcher panel compact-panel">
-        <button id="showHeatmapView" class="primary">Project overview</button>
-        <button id="showRoadmapView">Roadmap</button>
-        <button id="showProjectsView">Projects</button>
-        <button id="showPersonnelView">Personnel</button>
-        <button id="showPlanningView">Admin</button>
-        <button id="showMappingsView">Data Mapping</button>
-        <button id="showUserManagementView" class="hidden-view">User Management</button>
-      </nav>
 
       <section id="settingsPanel" class="panel settings-panel hidden-view">
         <div class="panel-head">
@@ -71,6 +72,10 @@
           <div class="panel-head">
             <h2>Project overview</h2>
             <div class="actions">
+              <div class="range-presets" id="projectOverviewStatusFilter">
+                <button type="button" data-project-filter="active" class="primary">Active</button>
+                <button type="button" data-project-filter="all">All</button>
+              </div>
               <div class="range-presets" id="projectHeatmapDensityPresets">
                 <button type="button" data-density="large">Large</button>
                 <button type="button" data-density="medium" class="primary">Medium</button>

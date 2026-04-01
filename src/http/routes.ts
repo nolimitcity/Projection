@@ -97,11 +97,17 @@ const updateProjectSchema = z
         preProductionLengthDays: z.number().int().min(0).optional()
       })
       .optional(),
-    status: z.enum(["active", "archived", "deleted"]).optional()
+    status: z.enum(["active", "completed"]).optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one field must be provided for update."
   });
+
+const shiftProjectReleaseSchema = z.object({
+  weekShift: z.number().int().refine((value) => value !== 0, {
+    message: "weekShift must be a non-zero integer."
+  })
+});
 
 const closureCreateSchema = z.object({
   label: z.string().min(1),
@@ -276,6 +282,16 @@ export const createRouter = (store: ProjectionStore) => {
     res.status(200).json(toProjectResponse(updated));
   });
 
+  router.post("/api/v1/projects/:id/shift-release", (req: Request, res: Response) => {
+    const { id } = pathIdSchema.parse(req.params);
+    const body = shiftProjectReleaseSchema.parse(req.body);
+    const result = projectService.shiftProjectReleaseWithAssignments(getActor(req), id, body.weekShift);
+    res.status(200).json({
+      project: toProjectResponse(result.project),
+      shiftedAssignments: result.shiftedAssignments
+    });
+  });
+
   router.get("/api/v1/projects", (_req: Request, res: Response) => {
     res.status(200).json(projectService.listProjects().map((project) => toProjectResponse(project)));
   });
@@ -357,6 +373,12 @@ export const createRouter = (store: ProjectionStore) => {
     const body = personCreateSchema.parse(req.body);
     const updated = projectService.updatePerson(getActor(req), id, body);
     res.status(200).json(updated);
+  });
+
+  router.delete("/api/v1/people/:id", (req: Request, res: Response) => {
+    const { id } = pathIdSchema.parse(req.params);
+    projectService.deletePerson(getActor(req), id);
+    res.status(204).send();
   });
 
   router.get("/api/v1/assignments", (_req: Request, res: Response) => {

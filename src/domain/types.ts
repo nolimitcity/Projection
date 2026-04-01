@@ -43,7 +43,7 @@ export interface MilestoneOffsets {
   preProductionLengthDays: number;
 }
 
-export type ProjectStatus = "active" | "archived" | "deleted";
+export type ProjectStatus = "active" | "completed";
 
 export interface Project {
   id: string;
@@ -138,7 +138,7 @@ export interface ProjectUpdateInput {
   comments?: string;
   releaseDate?: string;
   milestoneOffsetsDays?: Partial<MilestoneOffsets>;
-  status?: "active" | "archived" | "deleted";
+  status?: "active" | "completed";
 }
 
 export interface GlobalClosure {

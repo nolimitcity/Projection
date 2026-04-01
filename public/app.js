@@ -35,6 +35,7 @@ const el = {
   addPersonRow: document.querySelector('#addPersonRow'),
   loadUtilization: document.querySelector('#loadUtilization'),
   projectHeatmapDensityPresets: document.querySelector('#projectHeatmapDensityPresets'),
+  projectOverviewStatusFilter: document.querySelector('#projectOverviewStatusFilter'),
   utilizationSummary: document.querySelector('#utilizationSummary'),
   utilizationTimeline: document.querySelector('#utilizationTimeline'),
   projectTimelineSummary: document.querySelector('#projectTimelineSummary'),
@@ -85,8 +86,9 @@ const state = {
   expandedProjectIds: [],
   editingMappingId: null,
   projectAssignmentEditor: null,
-  projectHeatmapDensity: 'medium'
-  ,
+  projectAssignmentDateSelection: null,
+  projectHeatmapDensity: 'medium',
+  projectOverviewFilter: 'active',
   currentUser: null,
   users: []
 };
@@ -680,8 +682,7 @@ const projectInlineEditorHtml = (project) => {
       Status
       <select name="status">
         <option value="active" ${project.status === 'active' ? 'selected' : ''}>active</option>
-        <option value="archived" ${project.status === 'archived' ? 'selected' : ''}>archived</option>
-        <option value="deleted" ${project.status === 'deleted' ? 'selected' : ''}>deleted</option>
+        <option value="completed" ${project.status === 'completed' ? 'selected' : ''}>completed</option>
       </select>
     </label>
     <label>
@@ -948,6 +949,7 @@ const setSettingsPanelOpen = (open) => {
 };
 
 const normalizeHeatmapDensity = (value) => (value === 'large' || value === 'medium' || value === 'compact' ? value : 'medium');
+const normalizeProjectOverviewFilter = (value) => (value === 'all' || value === 'active' ? value : 'active');
 
 const syncHeatmapDensityButtons = () => {
   const presetButtons = el.projectHeatmapDensityPresets?.querySelectorAll('button[data-density]') || [];
@@ -957,6 +959,17 @@ const syncHeatmapDensityButtons = () => {
     }
 
     button.classList.toggle('primary', button.dataset.density === state.projectHeatmapDensity);
+  });
+};
+
+const syncProjectOverviewFilterButtons = () => {
+  const filterButtons = el.projectOverviewStatusFilter?.querySelectorAll('button[data-project-filter]') || [];
+  filterButtons.forEach((button) => {
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    button.classList.toggle('primary', button.dataset.projectFilter === state.projectOverviewFilter);
   });
 };
 
@@ -974,9 +987,11 @@ const countWeeksInclusive = (startIso, endIso) => {
   return Math.floor(diffDays / 7) + 1;
 };
 
-const getActiveProjectTimelineRange = () => {
-  const activeProjects = state.projects.filter((project) => project.status === 'active');
-  if (!activeProjects.length) {
+const getVisibleProjectTimelineRange = () => {
+  const visibleProjects = state.projects.filter((project) =>
+    state.projectOverviewFilter === 'all' ? true : project.status === 'active'
+  );
+  if (!visibleProjects.length) {
     const todayIso = new Date().toISOString().slice(0, 10);
     return {
       weekStart: toMondayIso(todayIso),
@@ -987,7 +1002,7 @@ const getActiveProjectTimelineRange = () => {
 
   let minStart = null;
   let maxEnd = null;
-  activeProjects.forEach((project) => {
+  visibleProjects.forEach((project) => {
     if (project.startDate && (!minStart || project.startDate < minStart)) {
       minStart = project.startDate;
     }
@@ -1022,8 +1037,14 @@ const setHeatmapDensity = (density) => {
   renderProjectUtilizationTimeline();
 };
 
+const setProjectOverviewFilter = async (filter) => {
+  state.projectOverviewFilter = normalizeProjectOverviewFilter(filter);
+  syncProjectOverviewFilterButtons();
+  await refreshOverviewAnalytics();
+};
+
 const refreshOverviewAnalytics = async () => {
-  const range = getActiveProjectTimelineRange();
+  const range = getVisibleProjectTimelineRange();
   await Promise.all([
     loadUtilization(range.weekStart),
     loadUtilizationTimeline(range.weekStart, range.weeks),
@@ -1096,6 +1117,7 @@ const personEditFormHtml = (person) => `
     <div class="person-edit-actions">
       <button type="submit" class="primary">Save</button>
       <button type="button" data-action="collapse-person" data-id="${person.id}">Cancel</button>
+      <button type="button" class="warn" data-action="delete-person" data-id="${person.id}">Delete</button>
     </div>
   </form>
 `;
@@ -1591,19 +1613,92 @@ const assignmentWeekAllocation = (assignment, weekStart) => {
   return assignment.startDate <= weekEnd && assignment.endDate >= weekStart ? assignment.allocationPercent : 0;
 };
 
+const getProjectIdsForPersonWeek = (personId, weekStart) => {
+  const weekEnd = getWeekEndIso(weekStart);
+  const projectIds = state.assignments
+    .filter((assignment) => assignment.personId === personId)
+    .filter((assignment) => assignment.allocationPercent > 0)
+    .filter((assignment) => assignment.startDate <= weekEnd && assignment.endDate >= weekStart)
+    .map((assignment) => assignment.projectId);
+
+  return [...new Set(projectIds)];
+};
+
+const getProjectAssignmentDefaultRange = (projectId) => {
+  const project = state.projects.find((entry) => entry.id === projectId);
+  const milestones = project ? projectMilestones(project) : null;
+
+  return {
+    startDate: milestones?.preProductionStartDate || project?.startDate || '',
+    endDate: milestones?.certificationDate || project?.targetEndDate || ''
+  };
+};
+
+const syncProjectAssignmentEditorFromForm = (projectId, assignmentId = null) => {
+  if (!state.projectAssignmentEditor || state.projectAssignmentEditor.projectId !== projectId) {
+    return;
+  }
+
+  const selector = `.project-assignment-form[data-project-id="${projectId}"][data-assignment-id="${assignmentId || ''}"]`;
+  const form = el.projectUtilizationTimeline.querySelector(selector);
+  if (!(form instanceof HTMLFormElement)) {
+    return;
+  }
+
+  const formData = new FormData(form);
+  state.projectAssignmentEditor.personId = String(formData.get('personId') || state.projectAssignmentEditor.personId);
+  state.projectAssignmentEditor.roleCode = String(formData.get('roleCode') || state.projectAssignmentEditor.roleCode);
+  state.projectAssignmentEditor.allocationPercent = Number(formData.get('allocationPercent') || state.projectAssignmentEditor.allocationPercent);
+  state.projectAssignmentEditor.startDate = String(formData.get('startDate') || state.projectAssignmentEditor.startDate);
+  state.projectAssignmentEditor.endDate = String(formData.get('endDate') || state.projectAssignmentEditor.endDate);
+};
+
+const applyWeekToSelectedAssignmentDate = (projectId, weekStart, weekEnd) => {
+  const selection = state.projectAssignmentDateSelection;
+  const editor = state.projectAssignmentEditor;
+  if (!selection || !editor) {
+    return false;
+  }
+
+  if (selection.projectId !== projectId || editor.projectId !== projectId) {
+    return false;
+  }
+
+  if (selection.assignmentId !== (editor.assignmentId || null)) {
+    return false;
+  }
+
+  syncProjectAssignmentEditorFromForm(projectId, selection.assignmentId);
+  editor[selection.fieldName] = selection.fieldName === 'endDate' ? weekEnd : weekStart;
+  renderProjectUtilizationTimeline({ preservePosition: true });
+  return true;
+};
+
 const openProjectAssignmentEditor = (projectId, assignmentId = null, seedRange = null) => {
   const existing = assignmentId ? state.assignments.find((entry) => entry.id === assignmentId) : null;
-  const defaultWeek = seedRange?.weekStart || state.projectUtilizationTimeline?.rows[0]?.weeks?.[0]?.weekStart || '';
-  const defaultEnd = seedRange?.weekEnd || (defaultWeek ? getWeekEndIso(defaultWeek) : '');
+  const defaults = getProjectAssignmentDefaultRange(projectId);
+  const fallbackWeek = state.projectUtilizationTimeline?.rows[0]?.weeks?.[0]?.weekStart || '';
+  const defaultStart = seedRange?.weekStart || defaults.startDate || fallbackWeek;
+  const defaultEnd = seedRange?.weekEnd || defaults.endDate || (defaultStart ? getWeekEndIso(defaultStart) : '');
+
+  const defaultPersonId = existing?.personId || state.people[0]?.id || '';
+  const defaultPerson = state.people.find((p) => p.id === defaultPersonId);
+  const defaultRoleCode = existing?.roleCode || defaultPerson?.primaryRoleCode || '';
 
   state.projectAssignmentEditor = {
     projectId,
     assignmentId,
-    personId: existing?.personId || state.people[0]?.id || '',
-    roleCode: existing?.roleCode || 'A',
+    personId: defaultPersonId,
+    roleCode: defaultRoleCode,
     allocationPercent: existing?.allocationPercent || 50,
-    startDate: existing?.startDate || defaultWeek,
+    startDate: existing?.startDate || defaultStart,
     endDate: existing?.endDate || defaultEnd
+  };
+
+  state.projectAssignmentDateSelection = {
+    projectId,
+    assignmentId,
+    fieldName: 'startDate'
   };
 
   renderProjectUtilizationTimeline({ preservePosition: true });
@@ -1611,7 +1706,24 @@ const openProjectAssignmentEditor = (projectId, assignmentId = null, seedRange =
 
 const closeProjectAssignmentEditor = () => {
   state.projectAssignmentEditor = null;
+  state.projectAssignmentDateSelection = null;
   renderProjectUtilizationTimeline({ preservePosition: true });
+};
+
+// When the person select changes, auto-reset the role select to that person's primary role.
+// Called inline via onchange — no full re-render needed.
+const onAssignmentPersonChange = (selectEl) => {
+  const personId = selectEl.value;
+  const person = state.people.find((p) => p.id === personId);
+  if (!person) return;
+  const form = selectEl.closest('form.project-assignment-form');
+  if (!form) return;
+  const roleSelect = form.querySelector('select[name="roleCode"]');
+  if (roleSelect) roleSelect.value = person.primaryRoleCode;
+  if (state.projectAssignmentEditor) {
+    state.projectAssignmentEditor.personId = personId;
+    state.projectAssignmentEditor.roleCode = person.primaryRoleCode;
+  }
 };
 
 const renderProjectAssignmentEditor = (projectId, assignmentId = null) => {
@@ -1624,14 +1736,14 @@ const renderProjectAssignmentEditor = (projectId, assignmentId = null) => {
   }
 
   const personOptions = state.people
-    .map((person) => `<option value="${person.id}" ${person.id === editor.personId ? 'selected' : ''}>${escapeHtml(person.name)} (${escapeHtml(person.primaryRoleCode)})</option>`)
+    .map((p) => `<option value="${escapeHtml(p.id)}" ${p.id === editor.personId ? 'selected' : ''}>${escapeHtml(p.name)}</option>`)
     .join('');
 
   return `
     <form class="project-assignment-form grid three" data-project-id="${projectId}" data-assignment-id="${editor.assignmentId || ''}" data-editor-mode="${isCreateEditor ? 'create' : 'edit'}">
       <label>
         Person
-        <select name="personId">${personOptions}</select>
+        <select name="personId" onchange="onAssignmentPersonChange(this)">${personOptions}</select>
       </label>
       <label>
         Role
@@ -1676,10 +1788,12 @@ const renderProjectPersonnelDetails = (projectId, weeks, projectCellWidth) => {
     ? projectAssignments
     .map((assignment) => {
       const person = state.people.find((entry) => entry.id === assignment.personId);
+      const personTodayWeekStart = toMondayIso(new Date().toISOString().slice(0, 10));
       const weekCells = weeks
         .map((week) => {
           const allocation = assignmentWeekAllocation(assignment, week.weekStart);
-          return `<span class="person-week-cell ${allocation > 0 ? 'active' : ''}">${allocation > 0 ? `${Math.round(allocation)}%` : ''}</span>`;
+          const cwClass = week.weekStart === personTodayWeekStart ? ' current-week' : '';
+          return `<span class="person-week-cell ${allocation > 0 ? 'active' : ''}${cwClass}">${allocation > 0 ? `${Math.round(allocation)}%` : ''}</span>`;
         })
         .join('');
 
@@ -1709,21 +1823,31 @@ const renderProjectUtilizationTimeline = (options = {}) => {
     return;
   }
 
-  const firstRowWeeks = timeline.rows[0]?.weeks ?? [];
+  const visibleRows = timeline.rows.filter((row) => {
+    const project = state.projects.find((entry) => entry.id === row.projectId);
+    if (!project) {
+      return false;
+    }
+
+    return state.projectOverviewFilter === 'all' ? true : project.status === 'active';
+  });
+
+  const firstRowWeeks = visibleRows[0]?.weeks ?? [];
   const headers = firstRowWeeks;
   if (!headers.length) {
-    el.projectUtilizationTimeline.innerHTML = '<p>No active projects available for timeline view.</p>';
+    el.projectUtilizationTimeline.innerHTML = `<p>No ${state.projectOverviewFilter === 'all' ? '' : 'active '}projects available for timeline view.</p>`;
     return;
   }
 
+  const todayWeekStart = toMondayIso(new Date().toISOString().slice(0, 10));
   const headerHtml = headers
-    .map((week) => `<div class="timeline-head-cell">${week.weekStart.slice(5)}</div>`)
+    .map((week) => `<div class="timeline-head-cell${week.weekStart === todayWeekStart ? ' current-week' : ''}">${week.weekStart.slice(5)}</div>`)
     .join('');
 
   const pinnedLeadColumnWidth = 192;
   const projectCellWidth = HEATMAP_DENSITY_WIDTH[state.projectHeatmapDensity] || HEATMAP_DENSITY_WIDTH.medium;
 
-  const rowsHtml = timeline.rows
+  const rowsHtml = visibleRows
     .map((row) => {
       const expanded = isProjectRowExpanded(row.projectId);
       const project = state.projects.find((entry) => entry.id === row.projectId);
@@ -1764,7 +1888,8 @@ const renderProjectUtilizationTimeline = (options = {}) => {
           const milestoneMarkers = exclusiveMarker || productionMarker || certMarker || releaseMarker
             ? `<span class="project-cell-milestones">${exclusiveMarker}${productionMarker}${certMarker}${releaseMarker}</span>`
             : '';
-          return `<button class="timeline-cell ${tone} ${closureClass}"${closureStyle} data-timeline="project" data-project-id="${row.projectId}" data-label="${escapeHtml(row.projectName)}" data-week-start="${week.weekStart}" data-release-drop="true" title="${row.projectName}: ${hoursWhole}h, ${week.assignedPeopleCount} people on ${week.weekStart}${peakBadge}${scheduleBadge}${closureBadge}"><span class="project-cell-hours">${cellLabel}</span>${milestoneMarkers}</button>`;
+          const currentWeekClass = week.weekStart === todayWeekStart ? ' current-week' : '';
+          return `<button class="timeline-cell ${tone} ${closureClass}${currentWeekClass}"${closureStyle} data-timeline="project" data-project-id="${row.projectId}" data-label="${escapeHtml(row.projectName)}" data-week-start="${week.weekStart}" data-release-drop="true" title="${row.projectName}: ${hoursWhole}h, ${week.assignedPeopleCount} people on ${week.weekStart}${peakBadge}${scheduleBadge}${closureBadge}"><span class="project-cell-hours">${cellLabel}</span>${milestoneMarkers}</button>`;
         })
         .join('');
 
@@ -1776,9 +1901,6 @@ const renderProjectUtilizationTimeline = (options = {}) => {
             </div>
             <div class="project-row-label project-name-cell">
               <strong>${escapeHtml(row.projectName)}</strong>
-              <span class="row-plan-link">Cert ${certificationDate || '-'}</span>
-              <span class="row-plan-link">Release ${releaseDate}</span>
-              ${canEditData() ? `<button class="row-plan-link" data-action="open-project-assignment-editor" data-project-id="${row.projectId}" title="Plan assignments for ${escapeHtml(row.projectName)}">Plan</button>` : ''}
             </div>
           </div>
           <div class="project-timeline-scroll-slave">
@@ -1854,25 +1976,10 @@ const renderProjectUtilizationTimeline = (options = {}) => {
     }
 
     try {
-      await Promise.all([
-        fetchJson(`/api/v1/projects/${projectId}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ releaseDate: shiftedReleaseDate })
-        }),
-        ...assignmentsForProject.map((assignment) =>
-          fetchJson(`/api/v1/assignments/${assignment.id}`, {
-            method: 'PATCH',
-            body: JSON.stringify({
-              personId: assignment.personId,
-              projectId: assignment.projectId,
-              roleCode: assignment.roleCode,
-              allocationPercent: assignment.allocationPercent,
-              startDate: addDaysIso(assignment.startDate, shiftDays),
-              endDate: addDaysIso(assignment.endDate, shiftDays)
-            })
-          })
-        )
-      ]);
+      await fetchJson(`/api/v1/projects/${projectId}/shift-release`, {
+        method: 'POST',
+        body: JSON.stringify({ weekShift })
+      });
       await Promise.all([loadProjects(), loadAssignments(), refreshOverviewAnalytics()]);
       log('Project release date moved with assignments', {
         projectId,
@@ -2160,6 +2267,55 @@ const bindForms = () => {
   el.roadmapProjectsList?.addEventListener('focusin', onWeekDisplayFocus);
   el.roadmapProjectsList?.addEventListener('focusout', onWeekDisplayBlur);
 
+  const selectProjectAssignmentDateInput = (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || target.type !== 'date') {
+      return;
+    }
+
+    if (target.name !== 'startDate' && target.name !== 'endDate') {
+      return;
+    }
+
+    const form = target.closest('.project-assignment-form');
+    if (!(form instanceof HTMLFormElement)) {
+      return;
+    }
+
+    state.projectAssignmentDateSelection = {
+      projectId: String(form.dataset.projectId || ''),
+      assignmentId: form.dataset.assignmentId ? String(form.dataset.assignmentId) : null,
+      fieldName: target.name
+    };
+  };
+
+  el.projectUtilizationTimeline.addEventListener('focusin', selectProjectAssignmentDateInput);
+  el.projectUtilizationTimeline.addEventListener('click', selectProjectAssignmentDateInput);
+
+  el.projectUtilizationTimeline.addEventListener('input', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
+      return;
+    }
+
+    const form = target.closest('.project-assignment-form');
+    if (!(form instanceof HTMLFormElement)) {
+      return;
+    }
+
+    const projectId = String(form.dataset.projectId || '');
+    const assignmentId = form.dataset.assignmentId ? String(form.dataset.assignmentId) : null;
+    syncProjectAssignmentEditorFromForm(projectId, assignmentId);
+
+    if (target instanceof HTMLInputElement && target.type === 'date' && (target.name === 'startDate' || target.name === 'endDate')) {
+      state.projectAssignmentDateSelection = {
+        projectId,
+        assignmentId,
+        fieldName: target.name
+      };
+    }
+  });
+
   el.createClosureForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!ensureEditable()) {
@@ -2436,6 +2592,20 @@ const bindButtons = () => {
       log('Project heatmap size updated', { density: state.projectHeatmapDensity });
     } catch (error) {
       log('Update project heatmap size failed', error);
+    }
+  });
+
+  el.projectOverviewStatusFilter?.addEventListener('click', async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement) || !target.dataset.projectFilter) {
+      return;
+    }
+
+    try {
+      await setProjectOverviewFilter(target.dataset.projectFilter);
+      log('Project overview filter updated', { filter: state.projectOverviewFilter });
+    } catch (error) {
+      log('Update project overview filter failed', error);
     }
   });
 
@@ -3036,7 +3206,12 @@ const bindButtons = () => {
   });
 
   const onTimelineClick = async (event) => {
-    const target = event.target;
+    const rawTarget = event.target;
+    if (!(rawTarget instanceof Element)) {
+      return;
+    }
+
+    const target = rawTarget.closest('button');
     if (!(target instanceof HTMLButtonElement)) {
       return;
     }
@@ -3048,6 +3223,25 @@ const bindButtons = () => {
 
     if (target.dataset.action === 'collapse-person' && target.dataset.id) {
       togglePersonExpanded(target.dataset.id);
+      return;
+    }
+
+    if (target.dataset.action === 'delete-person' && target.dataset.id) {
+      if (!ensureEditable()) {
+        return;
+      }
+      const personId = target.dataset.id;
+      const person = state.people.find((p) => p.id === personId);
+      const name = person?.name ?? 'this person';
+      if (!confirm(`Delete ${name}? This cannot be undone. Remove all their project assignments first.`)) {
+        return;
+      }
+      fetchJson(`/api/v1/people/${personId}`, { method: 'DELETE' })
+        .then(() => {
+          state.expandedPersonIds = state.expandedPersonIds.filter((id) => id !== personId);
+          return Promise.all([loadPeople(), refreshOverviewAnalytics()]);
+        })
+        .catch((error) => log('Delete person failed', error));
       return;
     }
 
@@ -3159,23 +3353,35 @@ const bindButtons = () => {
     const weekEnd = end.toISOString().slice(0, 10);
 
     if (target.dataset.timeline === 'person' && target.dataset.personId) {
+      const personId = target.dataset.personId;
+      const projectIds = getProjectIdsForPersonWeek(personId, weekStart);
+      if (!projectIds.length) {
+        return;
+      }
+
+      state.expandedProjectIds = projectIds;
+      state.projectAssignmentEditor = null;
+      state.projectAssignmentDateSelection = null;
+      setActiveView('heatmap', { updateHistory: true });
+      renderProjectUtilizationTimeline({ preservePosition: true });
+      log('Opened project overview from personnel week', {
+        personId,
+        weekStart,
+        expandedProjects: projectIds.length
+      });
       return;
     }
 
     if (target.dataset.timeline === 'project' && target.dataset.projectId) {
-      if (!ensureEditable()) {
-        return;
-      }
       const projectId = target.dataset.projectId;
-      if (!isProjectRowExpanded(projectId)) {
-        state.expandedProjectIds = [...state.expandedProjectIds, projectId];
+      if (applyWeekToSelectedAssignmentDate(projectId, weekStart, weekEnd)) {
+        log('Project week applied to selected date field', {
+          projectId,
+          weekStart,
+          weekEnd,
+          fieldName: state.projectAssignmentDateSelection?.fieldName || ''
+        });
       }
-      openProjectAssignmentEditor(projectId, null, { weekStart, weekEnd });
-      log('Project week selected for inline planning', {
-        projectId,
-        weekStart,
-        weekEnd
-      });
       return;
     }
   };
@@ -3201,6 +3407,7 @@ const bindButtons = () => {
 
 initializeThemeMode();
 setHeatmapDensity(localStorage.getItem(HEATMAP_DENSITY_KEY));
+syncProjectOverviewFilterButtons();
 syncPlanningVisibility();
 syncMappingTabVisibility();
 syncUserManagementTabVisibility();

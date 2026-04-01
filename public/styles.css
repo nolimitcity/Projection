@@ -127,6 +127,32 @@ body {
   font-size: clamp(1.5rem, 3.2vw, 2.2rem);
 }
 
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.header-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.app-name-pill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.42rem 0.72rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 92%, var(--accent) 8%);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
 .hero p {
   color: var(--muted);
   margin-top: 0.4rem;
@@ -151,6 +177,19 @@ body {
   display: flex;
   gap: 0.6rem;
   align-items: center;
+}
+
+.header-toolbar .view-switcher {
+  margin-top: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.settings-toggle-inline {
+  flex: 0 0 auto;
 }
 
 .view-stack {
@@ -772,41 +811,30 @@ button.warn {
   background: var(--range-bg);
 }
 
-.theme-toggle-floating {
-  position: fixed;
-  top: 0.65rem;
-  right: 0.75rem;
-  z-index: 3;
+.theme-toggle-inline {
+  flex: 0 0 auto;
   width: 2rem;
   height: 2rem;
   min-width: 2rem;
   border-radius: 999px;
   border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
   color: var(--text);
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 0.9rem;
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.14);
-  backdrop-filter: blur(6px);
 }
 
-.settings-toggle-floating {
-  position: fixed;
-  top: 0.65rem;
-  right: 3.15rem;
-  z-index: 3;
+.settings-toggle-inline {
   border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
   color: var(--text);
   padding: 0.4rem 0.65rem;
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.14);
-  backdrop-filter: blur(6px);
 }
 
-.settings-toggle-floating:hover {
+.settings-toggle-inline:hover {
   border-color: var(--accent);
 }
 
@@ -819,11 +847,11 @@ button.warn {
   margin-top: 0;
 }
 
-.theme-toggle-floating:hover {
+.theme-toggle-inline:hover {
   border-color: var(--accent);
 }
 
-.theme-toggle-floating[data-theme='dark'] {
+.theme-toggle-inline[data-theme='dark'] {
   background: color-mix(in srgb, var(--surface) 90%, transparent);
 }
 
@@ -1362,6 +1390,18 @@ button.warn {
   font-size: 0.74rem;
 }
 
+/* Current-week column highlight */
+.timeline-head-cell.current-week {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.timeline-cell.current-week,
+.person-week-cell.current-week {
+  box-shadow: inset 2px 0 0 var(--accent), inset -2px 0 0 var(--accent);
+}
+
 @media (min-width: 1200px) {
   #projectsView .panel,
   #personnelView .panel {
@@ -1416,5 +1456,16 @@ button.warn {
   .grid.two,
   .grid.three {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .header-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .header-toolbar .view-switcher {
+    flex: 1 1 100%;
+    order: 3;
   }
 }

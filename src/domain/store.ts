@@ -233,7 +233,7 @@ const createSeedSnapshot = (): StoreSnapshot => {
           preProductionLengthDays: 28
         }
       },
-      status: "archived",
+      status: "completed",
       createdAt: now(),
       createdBy: "seed-admin",
       source: { type: "blank" }
@@ -622,6 +622,11 @@ export class SqliteStore implements ProjectionStore {
       }
       if (!project.releaseDate) {
         project.releaseDate = project.targetEndDate;
+        migrated = true;
+      }
+      const legacyStatus = String(project.status || "");
+      if (legacyStatus === "archived" || legacyStatus === "deleted") {
+        project.status = "completed";
         migrated = true;
       }
     });

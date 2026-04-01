@@ -341,6 +341,36 @@ const validateAssignmentInput = (input: ProjectAssignmentCreateInput) => {
   }
 };
 
+const validateAssignmentWithinProjectWindow = (project: Project, startDate: string, endDate: string) => {
+  const projectEnd = project.adjustedEndDate || project.targetEndDate || project.releaseDate;
+  if (startDate < project.startDate || endDate > projectEnd) {
+    throw badRequest("Assignment dates must be within the project schedule.", {
+      assignmentStartDate: startDate,
+      assignmentEndDate: endDate,
+      projectStartDate: project.startDate,
+      projectEndDate: projectEnd
+    });
+  }
+};
+
+const clampAssignmentToProjectWindow = (
+  project: Project,
+  startDate: string,
+  endDate: string
+): { startDate: string; endDate: string } => {
+  const projectStart = project.startDate;
+  const projectEnd = project.adjustedEndDate || project.targetEndDate || project.releaseDate;
+
+  const clampedStart = startDate < projectStart ? projectStart : startDate;
+  const clampedEnd = endDate > projectEnd ? projectEnd : endDate;
+
+  if (clampedEnd < clampedStart) {
+    return { startDate: projectEnd, endDate: projectEnd };
+  }
+
+  return { startDate: clampedStart, endDate: clampedEnd };
+};
+
 const validateDates = (startDate: string, targetEndDate: string) => {
   const start = parseIsoDate(startDate);
   const end = parseIsoDate(targetEndDate);
@@ -665,6 +695,20 @@ export class ProjectService {
     return person;
   }
 
+  deletePerson(actor: ActorContext, personId: string): void {
+    assertCreatePermission(actor);
+    const index = this.store.people.findIndex((entry) => entry.id === personId);
+    if (index < 0) {
+      throw notFound("Person not found.", { personId });
+    }
+    const hasAssignments = this.store.assignments.some((a) => a.personId === personId);
+    if (hasAssignments) {
+      throw badRequest("Cannot delete a person who has project assignments. Remove their assignments first.", { personId });
+    }
+    this.store.people.splice(index, 1);
+    this.store.save();
+  }
+
   listAssignments(): ProjectAssignment[] {
     return this.store.assignments;
   }
@@ -691,6 +735,8 @@ export class ProjectService {
     if (project.status !== "active") {
       throw badRequest("Assignments can only be created for active projects.", { projectId: input.projectId });
     }
+
+    validateAssignmentWithinProjectWindow(project, input.startDate, input.endDate);
 
     const assignment: ProjectAssignment = {
       id: uuidv4(),
@@ -736,6 +782,8 @@ export class ProjectService {
     if (project.status !== "active") {
       throw badRequest("Assignments can only be created for active projects.", { projectId: input.projectId });
     }
+
+    validateAssignmentWithinProjectWindow(project, input.startDate, input.endDate);
 
     assignment.personId = input.personId;
     assignment.projectId = input.projectId;
@@ -876,10 +924,8 @@ export class ProjectService {
     }
 
     const rangeEnd = formatIsoDate(addDays(parseIsoDate(weekStart), weekCount * 7 - 1));
-    const visibleProjects = this.store.projects.filter(
-      (project) =>
-        project.status !== "deleted" &&
-        rangesOverlap(project.startDate, project.adjustedEndDate, weekStart, rangeEnd)
+    const visibleProjects = this.store.projects.filter((project) =>
+      rangesOverlap(project.startDate, project.adjustedEndDate, weekStart, rangeEnd)
     );
     const rowMap = new Map<string, ProjectUtilizationTimelineRow>(
       visibleProjects.map((project) => [
@@ -1139,10 +1185,6 @@ export class ProjectService {
       throw notFound("Source project not found.", { sourceProjectId });
     }
 
-    if (sourceProject.status === "deleted") {
-      throw badRequest("Deleted projects cannot be used as copy source.", { sourceProjectId });
-    }
-
     const settings = mergeSettings(sourceProject.settings, settingsOverride);
     validateSettings(settings);
 
@@ -1168,9 +1210,7 @@ export class ProjectService {
     parseIsoDate(input.releaseDate);
 
     const name = input.name.trim();
-    const existing = this.store.projects
-      .filter((project) => project.status !== "deleted")
-      .map((project) => normalizeName(project.name));
+    const existing = this.store.projects.map((project) => normalizeName(project.name));
 
     if (existing.includes(normalizeName(name))) {
       throw conflict("Project name already exists. Please choose another name.", {
@@ -1238,7 +1278,7 @@ export class ProjectService {
     const nameChanged = normalizeName(nextName) !== normalizeName(project.name);
     if (nameChanged) {
       const existing = this.store.projects
-        .filter((entry) => entry.id !== projectId && entry.status !== "deleted")
+        .filter((entry) => entry.id !== projectId)
         .map((entry) => normalizeName(entry.name));
       if (existing.includes(normalizeName(nextName))) {
         throw conflict("Project name already exists. Please choose another name.", {
@@ -1265,6 +1305,40 @@ export class ProjectService {
     this.applyScheduleAdjustment(project);
     this.store.save();
     return project;
+  }
+
+  shiftProjectReleaseWithAssignments(actor: ActorContext, projectId: string, weekShift: number): {
+    project: Project;
+    shiftedAssignments: number;
+  } {
+    assertCreatePermission(actor);
+    if (!Number.isInteger(weekShift) || weekShift === 0) {
+      throw badRequest("weekShift must be a non-zero integer.");
+    }
+
+    const project = this.store.projects.find((entry) => entry.id === projectId);
+    if (!project) {
+      throw notFound("Project not found.", { projectId });
+    }
+
+    const shiftDays = weekShift * 7;
+    project.releaseDate = formatIsoDate(addDays(parseIsoDate(project.releaseDate), shiftDays));
+    this.applyScheduleAdjustment(project);
+
+    const assignmentsForProject = this.store.assignments.filter((assignment) => assignment.projectId === projectId);
+    assignmentsForProject.forEach((assignment) => {
+      const shiftedStartDate = formatIsoDate(addDays(parseIsoDate(assignment.startDate), shiftDays));
+      const shiftedEndDate = formatIsoDate(addDays(parseIsoDate(assignment.endDate), shiftDays));
+      const clamped = clampAssignmentToProjectWindow(project, shiftedStartDate, shiftedEndDate);
+      assignment.startDate = clamped.startDate;
+      assignment.endDate = clamped.endDate;
+    });
+
+    this.store.save();
+    return {
+      project,
+      shiftedAssignments: assignmentsForProject.length
+    };
   }
 
   listProjects(): Project[] {
