@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Projection MVP Console</title>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <script>
+      (() => {
+        const key = 'projection_theme_mode';
+        const stored = localStorage.getItem(key);
+        const mode = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+        const systemTheme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        document.documentElement.dataset.themeMode = mode;
+        document.documentElement.dataset.theme = mode === 'system' ? systemTheme : mode;
+      })();
+    </script>
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <button id="settingsToggle" class="settings-toggle-floating" type="button" aria-label="Open user settings" title="User settings">Settings</button>
+    <button id="themeToggle" class="theme-toggle-floating" type="button" aria-label="Toggle light and dark theme" title="Toggle theme">◐</button>
+    <div class="bg-shape bg-a"></div>
+    <div class="bg-shape bg-b"></div>
+    <main class="shell">
+      <header class="hero">
+        <h1>Projection</h1>
+        <div class="actions" id="accessRequestActions">
+          <button id="requestDestroyerAccess" type="button" class="warn hidden-view">Request Destroyer Access</button>
+        </div>
+      </header>
+
+      <nav class="view-switcher panel compact-panel">
+        <button id="showHeatmapView" class="primary">Project overview</button>
+        <button id="showRoadmapView">Roadmap</button>
+        <button id="showProjectsView">Projects</button>
+        <button id="showPersonnelView">Personnel</button>
+        <button id="showPlanningView">Admin</button>
+        <button id="showMappingsView">Data Mapping</button>
+        <button id="showUserManagementView" class="hidden-view">User Management</button>
+      </nav>
+
+      <section id="settingsPanel" class="panel settings-panel hidden-view">
+        <div class="panel-head">
+          <h2>User Settings</h2>
+          <button id="closeSettingsPanel" type="button">Close</button>
+        </div>
+        <div class="auth-row">
+          <button id="googleSignOut" type="button">Sign Out</button>
+          <span id="authStatus" class="meta">Not signed in</span>
+        </div>
+        <div class="grid two">
+          <label>
+            User ID
+            <input id="userId" value="demo-user" />
+          </label>
+          <label>
+            Roles (comma-separated)
+            <input id="userRole" value="PROJECT_OWNER" />
+          </label>
+        </div>
+        <button id="refreshAll" class="primary">Refresh Data</button>
+      </section>
+
+      <section id="heatmapView" class="view-stack">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Project overview</h2>
+            <div class="actions">
+              <div class="range-presets" id="projectHeatmapDensityPresets">
+                <button type="button" data-density="large">Large</button>
+                <button type="button" data-density="medium" class="primary">Medium</button>
+                <button type="button" data-density="compact">Compact</button>
+              </div>
+              <button id="loadUtilization">Load Overview</button>
+            </div>
+          </div>
+          <div id="projectTimelineSummary" class="meta"></div>
+          <div id="projectUtilizationTimeline" class="timeline-wrap"></div>
+        </section>
+      </section>
+
+      <section id="roadmapView" class="view-stack hidden-view">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Roadmap</h2>
+          </div>
+          <div id="roadmapProjectsList" class="card-list"></div>
+        </section>
+      </section>
+
+      <section id="projectsView" class="view-stack hidden-view">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Projects</h2>
+            <div class="actions">
+              <button id="addProjectRow" type="button">+ Add Project</button>
+              <button id="loadProjectsOverview">Reload Projects</button>
+            </div>
+          </div>
+          <div id="overviewProjectsList" class="card-list"></div>
+        </section>
+      </section>
+
+      <section id="personnelView" class="view-stack hidden-view">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Weekly Team Utilization</h2>
+            <div class="actions">
+              <button id="addPersonRow" type="button">+ Add Person</button>
+              <button id="showPlanningFromOverview">Open Admin</button>
+            </div>
+          </div>
+          <div id="utilizationSummary" class="meta"></div>
+          <div id="utilizationTimeline" class="timeline-wrap"></div>
+          <div id="newPersonArea" class="person-row-list"></div>
+        </section>
+      </section>
+
+      <section id="planningView" class="view-stack hidden-view">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Templates</h2>
+          <div class="actions">
+            <button id="addTemplateRow" type="button">+ Add Template</button>
+            <button id="loadTemplates">Reload Templates</button>
+          </div>
+        </div>
+        <div id="templatesList" class="card-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Global Closures</h2>
+          <div class="actions">
+            <button id="loadClosures">Reload Closures</button>
+          </div>
+        </div>
+        <div id="closuresList" class="card-list"></div>
+        <form id="createClosureForm" class="grid three">
+          <label>
+            Label
+            <input name="label" required />
+          </label>
+          <label>
+            Start Date
+            <input name="startDate" type="date" required />
+          </label>
+          <label>
+            End Date
+            <input name="endDate" type="date" required />
+          </label>
+          <button class="primary">Add Global Closure</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Role Definitions</h2>
+          <div class="actions"><button id="addRoleRow" type="button">+ Add Role</button></div>
+        </div>
+        <div id="rolesList" class="person-row-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Office Definitions</h2>
+          <div class="actions"><button id="addOfficeRow" type="button">+ Add Office</button></div>
+        </div>
+        <div id="officesList" class="person-row-list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Response Log</h2>
+        <pre id="responseLog" class="output"></pre>
+      </section>
+      </section>
+
+      <section id="mappingsView" class="view-stack hidden-view">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Database Table Mappings</h2>
+            <div class="actions">
+              <button id="loadMappings">Reload Mappings</button>
+            </div>
+          </div>
+          <p class="meta">Edit how source workbook columns map into target database tables and fields.</p>
+          <div id="mappingsList" class="card-list"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Edit Mapping</h2>
+          <form id="mappingForm" class="grid three">
+            <input name="mappingId" type="hidden" />
+            <label>
+              Source Sheet
+              <input name="sourceSheet" required />
+            </label>
+            <label>
+              Source Column
+              <input name="sourceColumn" required />
+            </label>
+            <label>
+              Target Table
+              <select name="targetTable" id="mappingTargetTable" required></select>
+            </label>
+            <label>
+              Target Field
+              <input name="targetField" required />
+            </label>
+            <label>
+              Transform
+              <input name="transform" placeholder="Optional transformation expression" />
+            </label>
+            <label>
+              Notes
+              <input name="notes" />
+            </label>
+            <label>
+              Enabled
+              <select name="enabled">
+                <option value="true">true</option>
+                <option value="false">false</option>
+              </select>
+            </label>
+            <div class="actions align-end full">
+              <button id="cancelMappingEdit" type="button">Reset</button>
+              <button class="primary" type="submit">Save Mapping</button>
+            </div>
+          </form>
+        </section>
+      </section>
+
+      <section id="userManagementView" class="view-stack hidden-view">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>User Management</h2>
+            <div class="actions">
+              <button id="loadUsers">Reload Users</button>
+            </div>
+          </div>
+          <p class="meta">Admins can update nickname and access level for anyone who has logged in.</p>
+          <div id="usersList" class="card-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <div id="confirmDialog" class="confirm-dialog hidden-view" role="dialog" aria-modal="true" aria-labelledby="confirmDialogTitle">
+      <div class="confirm-dialog-backdrop" data-action="cancel-confirm-change"></div>
+      <section class="confirm-dialog-panel panel compact-panel">
+        <h2 id="confirmDialogTitle">Confirm Change</h2>
+        <p id="confirmDialogMessage" class="meta"></p>
+        <div class="actions confirm-dialog-actions">
+          <button id="confirmChangeCancel" type="button">Cancel</button>
+          <button id="confirmChangeConfirm" type="button" class="primary">Confirm</button>
+        </div>
+      </section>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
