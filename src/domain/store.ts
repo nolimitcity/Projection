@@ -1,8 +1,9 @@
-import { mkdirSync } from "node:fs";
+import { copyFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { v4 as uuidv4 } from "uuid";
 import {
+  AuditEvent,
   DataMappingRule,
   GlobalClosure,
   OfficeDefinition,
@@ -37,6 +38,9 @@ export interface ProjectionStore extends StoreSnapshot {
   saveMappingRule(rule: DataMappingRule): void;
   deleteMappingRule(mappingId: string): void;
   listDatabaseTables(): string[];
+  logAuditEvent(event: { actor: string; method: string; path: string; status: number; detail?: string }): void;
+  listAuditEvents(limit?: number): AuditEvent[];
+  close(): void;
 }
 
 const SEED_ROLES: RoleDefinition[] = [
@@ -112,6 +116,9 @@ const SEED_TEMPLATE_DEFINITIONS: Array<{
     }
   }
 ];
+
+// Increment this constant whenever a new migration block is added to loadSnapshot.
+const SCHEMA_VERSION = 3;
 
 const createSeedSnapshot = (): StoreSnapshot => {
   const seedAdminAt = now();
@@ -206,6 +213,7 @@ const createSeedSnapshot = (): StoreSnapshot => {
       status: "active",
       createdAt: now(),
       createdBy: "seed-owner",
+      updatedAt: now(),
       source: { type: "blank" }
     },
     {
@@ -236,6 +244,7 @@ const createSeedSnapshot = (): StoreSnapshot => {
       status: "completed",
       createdAt: now(),
       createdBy: "seed-admin",
+      updatedAt: now(),
       source: { type: "blank" }
     }
   ];
@@ -268,7 +277,8 @@ const createSeedSnapshot = (): StoreSnapshot => {
       weeklyCapacityHours: 40,
       workingDays: [1, 2, 3, 4, 5],
       createdAt: now(),
-      createdBy: "seed-admin"
+      createdBy: "seed-admin",
+      updatedAt: now()
     },
     {
       id: uuidv4(),
@@ -278,7 +288,8 @@ const createSeedSnapshot = (): StoreSnapshot => {
       weeklyCapacityHours: 40,
       workingDays: [1, 2, 3, 4, 5],
       createdAt: now(),
-      createdBy: "seed-admin"
+      createdBy: "seed-admin",
+      updatedAt: now()
     },
     {
       id: uuidv4(),
@@ -288,10 +299,10 @@ const createSeedSnapshot = (): StoreSnapshot => {
       weeklyCapacityHours: 40,
       workingDays: [1, 2, 3, 4, 5],
       createdAt: now(),
-      createdBy: "seed-admin"
+      createdBy: "seed-admin",
+      updatedAt: now()
     }
   ];
-    users
 
   const assignments: ProjectAssignment[] = [
     {
@@ -303,7 +314,8 @@ const createSeedSnapshot = (): StoreSnapshot => {
       startDate: "2026-04-01",
       endDate: "2026-09-30",
       createdAt: now(),
-      createdBy: "seed-owner"
+      createdBy: "seed-owner",
+      updatedAt: now()
     },
     {
       id: uuidv4(),
@@ -314,7 +326,8 @@ const createSeedSnapshot = (): StoreSnapshot => {
       startDate: "2026-05-01",
       endDate: "2026-09-30",
       createdAt: now(),
-      createdBy: "seed-owner"
+      createdBy: "seed-owner",
+      updatedAt: now()
     },
     {
       id: uuidv4(),
@@ -325,7 +338,8 @@ const createSeedSnapshot = (): StoreSnapshot => {
       startDate: "2026-06-01",
       endDate: "2026-09-30",
       createdAt: now(),
-      createdBy: "seed-owner"
+      createdBy: "seed-owner",
+      updatedAt: now()
     }
   ];
 
@@ -439,10 +453,15 @@ export class SqliteStore implements ProjectionStore {
   public readonly users: UserAccount[];
 
   private readonly db: DatabaseSync;
+  private readonly dbPath: string;
 
   constructor(databasePath = resolve(process.cwd(), "data", "projection.sqlite")) {
+    this.dbPath = databasePath;
     mkdirSync(dirname(databasePath), { recursive: true });
     this.db = new DatabaseSync(databasePath);
+    this.db.exec("PRAGMA journal_mode = WAL");
+    this.db.exec("PRAGMA busy_timeout = 5000");
+    this.db.exec("PRAGMA synchronous = NORMAL");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS documents (
         key TEXT PRIMARY KEY,
@@ -465,7 +484,24 @@ export class SqliteStore implements ProjectionStore {
       )
     `);
 
-    const snapshot = this.loadSnapshot();
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id TEXT PRIMARY KEY,
+        actor TEXT NOT NULL,
+        method TEXT NOT NULL,
+        path TEXT NOT NULL,
+        status INTEGER NOT NULL,
+        detail TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    `);
+
+    const currentVersion = (this.db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+    if (currentVersion < SCHEMA_VERSION) {
+      this.backupDatabase();
+    }
+
+    const snapshot = this.loadSnapshot(currentVersion);
     this.templates = snapshot.templates;
     this.projects = snapshot.projects;
     this.globalClosures = snapshot.globalClosures;
@@ -474,6 +510,28 @@ export class SqliteStore implements ProjectionStore {
     this.roles = snapshot.roles;
     this.offices = snapshot.offices;
     this.users = snapshot.users;
+  }
+
+  close(): void {
+    try {
+      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } catch {
+      // best-effort
+    }
+    this.db.close();
+  }
+
+  private backupDatabase(): void {
+    try {
+      // Flush WAL into main file before copying so the backup is self-contained.
+      this.db.exec("PRAGMA wal_checkpoint(PASSIVE)");
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const backupPath = `${this.dbPath}.bak-${timestamp}`;
+      copyFileSync(this.dbPath, backupPath);
+    } catch {
+      // Backup is best-effort; a missing or unwritable data dir should not
+      // block startup.
+    }
   }
 
   save(): void {
@@ -565,7 +623,54 @@ export class SqliteStore implements ProjectionStore {
     return rows.map((row) => row.name);
   }
 
-  private loadSnapshot(): StoreSnapshot {
+  logAuditEvent(event: { actor: string; method: string; path: string; status: number; detail?: string }): void {
+    this.db
+      .prepare(
+        `INSERT INTO audit_log(id, actor, method, path, status, detail, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        uuidv4(),
+        event.actor,
+        event.method,
+        event.path,
+        event.status,
+        event.detail ?? "",
+        now()
+      );
+  }
+
+  listAuditEvents(limit = 200): AuditEvent[] {
+    const safeLimit = Number.isFinite(limit) ? Math.min(1000, Math.max(1, Math.floor(limit))) : 200;
+    const rows = this.db
+      .prepare(
+        `SELECT id, actor, method, path, status, detail, created_at
+         FROM audit_log
+         ORDER BY created_at DESC
+         LIMIT ?`
+      )
+      .all(safeLimit) as Array<{
+      id: string;
+      actor: string;
+      method: string;
+      path: string;
+      status: number;
+      detail: string;
+      created_at: string;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      actor: row.actor,
+      method: row.method,
+      path: row.path,
+      status: row.status,
+      detail: row.detail,
+      createdAt: row.created_at
+    }));
+  }
+
+  private loadSnapshot(currentVersion: number): StoreSnapshot {
     const rows = this.db.prepare("SELECT key, value FROM documents").all() as Array<{
       key: DocumentKey;
       value: string;
@@ -574,6 +679,7 @@ export class SqliteStore implements ProjectionStore {
     if (rows.length === 0) {
       const seeded = createSeedSnapshot();
       this.persistSnapshot(seeded);
+      this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
       return seeded;
     }
 
@@ -603,33 +709,61 @@ export class SqliteStore implements ProjectionStore {
     };
 
     let migrated = false;
-    snapshot.templates.forEach((template) => {
-      if (template.settings.milestoneOffsets) {
-        return;
-      }
-      template.settings.milestoneOffsets = { ...DEFAULT_MILESTONE_OFFSETS };
-      migrated = true;
-    });
 
-    snapshot.projects.forEach((project) => {
-      if (!("comments" in project)) {
-        (project as Project & { description?: string }).comments = (project as Project & { description?: string }).description ?? "";
-        migrated = true;
-      }
-      if (!project.settings.milestoneOffsets) {
-        project.settings.milestoneOffsets = { ...DEFAULT_MILESTONE_OFFSETS };
-        migrated = true;
-      }
-      if (!project.releaseDate) {
-        project.releaseDate = project.targetEndDate;
-        migrated = true;
-      }
-      const legacyStatus = String(project.status || "");
-      if (legacyStatus === "archived" || legacyStatus === "deleted") {
-        project.status = "completed";
-        migrated = true;
-      }
-    });
+    // v1: milestone offsets on templates
+    if (currentVersion < 1) {
+      snapshot.templates.forEach((template) => {
+        if (!template.settings.milestoneOffsets) {
+          template.settings.milestoneOffsets = { ...DEFAULT_MILESTONE_OFFSETS };
+          migrated = true;
+        }
+      });
+    }
+
+    // v2: project fields — comments, milestoneOffsets, releaseDate, status normalisation
+    if (currentVersion < 2) {
+      snapshot.projects.forEach((project) => {
+        if (!("comments" in project)) {
+          (project as Project & { description?: string }).comments = (project as Project & { description?: string }).description ?? "";
+          migrated = true;
+        }
+        if (!project.settings.milestoneOffsets) {
+          project.settings.milestoneOffsets = { ...DEFAULT_MILESTONE_OFFSETS };
+          migrated = true;
+        }
+        if (!project.releaseDate) {
+          project.releaseDate = project.targetEndDate;
+          migrated = true;
+        }
+        const legacyStatus = String(project.status || "");
+        if (legacyStatus === "archived" || legacyStatus === "deleted") {
+          project.status = "completed";
+          migrated = true;
+        }
+      });
+    }
+
+    // v3: updatedAt tracking on all mutable entities
+    if (currentVersion < 3) {
+      snapshot.projects.forEach((project) => {
+        if (!("updatedAt" in project) || !(project as Project & { updatedAt?: string }).updatedAt) {
+          (project as Project & { updatedAt: string }).updatedAt = project.createdAt || now();
+          migrated = true;
+        }
+      });
+      snapshot.people.forEach((person) => {
+        if (!("updatedAt" in person) || !(person as Person & { updatedAt?: string }).updatedAt) {
+          (person as Person & { updatedAt: string }).updatedAt = person.createdAt || now();
+          migrated = true;
+        }
+      });
+      snapshot.assignments.forEach((assignment) => {
+        if (!("updatedAt" in assignment) || !(assignment as ProjectAssignment & { updatedAt?: string }).updatedAt) {
+          (assignment as ProjectAssignment & { updatedAt: string }).updatedAt = assignment.createdAt || now();
+          migrated = true;
+        }
+      });
+    }
 
     if (syncSeedTemplates(snapshot.templates)) {
       migrated = true;
@@ -652,6 +786,10 @@ export class SqliteStore implements ProjectionStore {
 
     if (roleMerge.changed || officeMerge.changed || migrated) {
       this.persistSnapshot(snapshot);
+    }
+
+    if (currentVersion < SCHEMA_VERSION) {
+      this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     }
 
     return snapshot;

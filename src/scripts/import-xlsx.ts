@@ -95,7 +95,8 @@ const importPeople = (rows: SheetRows, importedAt: string): { people: Person[]; 
       weeklyCapacityHours: 40,
       workingDays: [1, 2, 3, 4, 5],
       createdAt: importedAt,
-      createdBy: "xlsx-import"
+      createdBy: "xlsx-import",
+      updatedAt: importedAt
     };
 
     people.push(person);
@@ -194,7 +195,8 @@ const importRoadmap = (
       weeklyCapacityHours: 40,
       workingDays: [1, 2, 3, 4, 5],
       createdAt: importedAt,
-      createdBy: "xlsx-import"
+      createdBy: "xlsx-import",
+      updatedAt: importedAt
     };
 
     peopleByName.set(key, person);
@@ -249,6 +251,7 @@ const importRoadmap = (
         status: "active",
         createdAt: importedAt,
         createdBy: "xlsx-import",
+        updatedAt: importedAt,
         source: { type: "blank" }
       };
 
@@ -278,7 +281,8 @@ const importRoadmap = (
       startDate: span.start,
       endDate: span.end,
       createdAt: importedAt,
-      createdBy: "xlsx-import"
+      createdBy: "xlsx-import",
+      updatedAt: importedAt
     });
   }
 

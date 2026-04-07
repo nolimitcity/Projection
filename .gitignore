@@ -134,3 +134,13 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# SQLite runtime sidecar files
+*.sqlite-wal
+*.sqlite-shm
+# Timestamped backups created before schema migrations
+*.sqlite.bak*
+
+# Temporary files
+.tmp-brace-check.cjs
+temp/

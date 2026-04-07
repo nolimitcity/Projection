@@ -58,6 +58,7 @@ export interface Project {
   status: ProjectStatus;
   createdAt: string;
   createdBy: string;
+  updatedAt: string;
   source: {
     type: "blank" | "template" | "copy";
     sourceId?: string;
@@ -121,6 +122,23 @@ export interface ProjectTemplateUpdateInput {
   description?: string;
   isActive?: boolean;
   settings?: ProjectSettingsOverride;
+  expectedUpdatedAt?: string;
+}
+
+export interface UserUpdateInput {
+  nickname?: string;
+  accessLevel?: AccessLevel;
+  expectedUpdatedAt?: string;
+}
+
+export interface AuditEvent {
+  id: string;
+  actor: string;
+  method: string;
+  path: string;
+  status: number;
+  detail: string;
+  createdAt: string;
 }
 
 export interface ProjectCreateInput {
@@ -139,6 +157,7 @@ export interface ProjectUpdateInput {
   releaseDate?: string;
   milestoneOffsetsDays?: Partial<MilestoneOffsets>;
   status?: "active" | "completed";
+  expectedUpdatedAt?: string;
 }
 
 export interface GlobalClosure {
@@ -165,6 +184,7 @@ export interface Person {
   workingDays: number[];
   createdAt: string;
   createdBy: string;
+  updatedAt: string;
 }
 
 export interface PersonCreateInput {
@@ -173,6 +193,7 @@ export interface PersonCreateInput {
   office: string;
   weeklyCapacityHours: number;
   workingDays?: number[];
+  expectedUpdatedAt?: string;
 }
 
 export interface ProjectAssignment {
@@ -185,6 +206,7 @@ export interface ProjectAssignment {
   endDate: string;
   createdAt: string;
   createdBy: string;
+  updatedAt: string;
 }
 
 export interface ProjectAssignmentCreateInput {
@@ -194,6 +216,7 @@ export interface ProjectAssignmentCreateInput {
   allocationPercent: number;
   startDate: string;
   endDate: string;
+  expectedUpdatedAt?: string;
 }
 
 export interface PersonUtilization {

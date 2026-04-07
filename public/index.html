@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Projection MVP Console</title>
+    <title>Projection</title>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -27,15 +27,17 @@
     <main class="shell">
       <header class="hero">
         <div class="header-toolbar">
-          <span class="app-name-pill">Projection</span>
+          <span class="app-name-pill" aria-label="Projection" title="Projection">
+            <img src="/favicon.ico" alt="Projection" class="app-brand-icon" />
+          </span>
           <nav class="view-switcher panel compact-panel">
             <button id="showHeatmapView" class="primary">Project overview</button>
             <button id="showRoadmapView">Roadmap</button>
             <button id="showProjectsView">Projects</button>
             <button id="showPersonnelView">Personnel</button>
+            <button id="showUserManagementView" class="hidden-view">User Management</button>
             <button id="showPlanningView">Admin</button>
             <button id="showMappingsView">Data Mapping</button>
-            <button id="showUserManagementView" class="hidden-view">User Management</button>
           </nav>
           <button id="settingsToggle" class="settings-toggle-inline" type="button" aria-label="Open user settings" title="User settings">Settings</button>
           <button id="themeToggle" class="theme-toggle-inline" type="button" aria-label="Toggle light and dark theme" title="Toggle theme">◐</button>
@@ -116,8 +118,16 @@
           <div class="panel-head">
             <h2>Weekly Team Utilization</h2>
             <div class="actions">
+              <div class="range-presets" id="personnelOverviewStatusFilter">
+                <button type="button" data-project-filter="active" class="primary">Active</button>
+                <button type="button" data-project-filter="all">All</button>
+              </div>
+              <div class="range-presets" id="personnelHeatmapDensityPresets">
+                <button type="button" data-personnel-density="large">Large</button>
+                <button type="button" data-personnel-density="medium" class="primary">Medium</button>
+                <button type="button" data-personnel-density="compact">Compact</button>
+              </div>
               <button id="addPersonRow" type="button">+ Add Person</button>
-              <button id="showPlanningFromOverview">Open Admin</button>
             </div>
           </div>
           <div id="utilizationSummary" class="meta"></div>
@@ -251,6 +261,17 @@
           <p class="meta">Admins can update nickname and access level for anyone who has logged in.</p>
           <div id="usersList" class="card-list"></div>
         </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Mutation Audit Log</h2>
+            <div class="actions">
+              <button id="loadAuditLog">Reload Audit Log</button>
+            </div>
+          </div>
+          <p class="meta">Recent API write activity for traceability.</p>
+          <div id="auditLogList" class="card-list"></div>
+        </section>
       </section>
     </main>
 
@@ -262,6 +283,27 @@
         <div class="actions confirm-dialog-actions">
           <button id="confirmChangeCancel" type="button">Cancel</button>
           <button id="confirmChangeConfirm" type="button" class="primary">Confirm</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="conflictDialog" class="confirm-dialog hidden-view" role="dialog" aria-modal="true" aria-labelledby="conflictDialogTitle">
+      <div class="confirm-dialog-backdrop" data-action="close-conflict-dialog"></div>
+      <section class="confirm-dialog-panel panel compact-panel conflict-dialog-panel">
+        <h2 id="conflictDialogTitle">Edit Conflict</h2>
+        <p id="conflictDialogMessage" class="meta"></p>
+        <div class="conflict-columns">
+          <section>
+            <h3>Your Attempt</h3>
+            <pre id="conflictAttemptedPayload" class="output"></pre>
+          </section>
+          <section>
+            <h3>Latest Server State</h3>
+            <pre id="conflictLatestPayload" class="output"></pre>
+          </section>
+        </div>
+        <div class="actions confirm-dialog-actions">
+          <button id="conflictDialogClose" type="button" class="primary">Reloaded, Close</button>
         </div>
       </section>
     </div>

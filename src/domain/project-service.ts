@@ -27,6 +27,7 @@ import {
   Role,
   RoleDefinition,
   UserAccount,
+  UserUpdateInput,
   UtilizationSnapshot,
   UtilizationTimeline,
   UtilizationTimelineRow
@@ -55,6 +56,7 @@ const DEFAULT_SETTINGS: ProjectSettings = {
 };
 
 const hasRole = (actor: ActorContext, roles: Role[]): boolean => actor.roles.some((role) => roles.includes(role));
+const nowIso = () => new Date().toISOString();
 
 const assertAdminPermission = (actor: ActorContext) => {
   if (!hasRole(actor, ["SYSTEM_ADMIN"])) {
@@ -658,8 +660,9 @@ export class ProjectService {
       office: officeCode,
       weeklyCapacityHours: input.weeklyCapacityHours,
       workingDays: input.workingDays ?? [1, 2, 3, 4, 5],
-      createdAt: new Date().toISOString(),
-      createdBy: actor.userId
+      createdAt: nowIso(),
+      createdBy: actor.userId,
+      updatedAt: nowIso()
     };
 
     this.store.people.push(person);
@@ -685,11 +688,20 @@ export class ProjectService {
       throw notFound("Person not found.", { personId });
     }
 
+    if (input.expectedUpdatedAt && person.updatedAt !== input.expectedUpdatedAt) {
+      throw conflict("Person was updated by someone else. Reload and try again.", {
+        personId,
+        expectedUpdatedAt: input.expectedUpdatedAt,
+        currentUpdatedAt: person.updatedAt
+      });
+    }
+
     person.name = input.name.trim();
     person.primaryRoleCode = roleCode;
     person.office = officeCode;
     person.weeklyCapacityHours = input.weeklyCapacityHours;
     person.workingDays = input.workingDays ?? [1, 2, 3, 4, 5];
+    person.updatedAt = nowIso();
 
     this.store.save();
     return person;
@@ -746,8 +758,9 @@ export class ProjectService {
       allocationPercent: input.allocationPercent,
       startDate: input.startDate,
       endDate: input.endDate,
-      createdAt: new Date().toISOString(),
-      createdBy: actor.userId
+      createdAt: nowIso(),
+      createdBy: actor.userId,
+      updatedAt: nowIso()
     };
 
     this.store.assignments.push(assignment);
@@ -767,6 +780,14 @@ export class ProjectService {
     const assignment = this.store.assignments.find((entry) => entry.id === assignmentId);
     if (!assignment) {
       throw notFound("Assignment not found.", { assignmentId });
+    }
+
+    if (input.expectedUpdatedAt && assignment.updatedAt !== input.expectedUpdatedAt) {
+      throw conflict("Assignment was updated by someone else. Reload and try again.", {
+        assignmentId,
+        expectedUpdatedAt: input.expectedUpdatedAt,
+        currentUpdatedAt: assignment.updatedAt
+      });
     }
 
     const person = this.store.people.find((entry) => entry.id === input.personId);
@@ -791,6 +812,7 @@ export class ProjectService {
     assignment.allocationPercent = input.allocationPercent;
     assignment.startDate = input.startDate;
     assignment.endDate = input.endDate;
+    assignment.updatedAt = nowIso();
 
     this.store.save();
     return assignment;
@@ -1049,9 +1071,17 @@ export class ProjectService {
     return [...this.store.users].sort((a, b) => a.email.localeCompare(b.email));
   }
 
-  updateUser(actor: ActorContext, email: string, input: { nickname?: string; accessLevel?: AccessLevel }): UserAccount {
+  updateUser(actor: ActorContext, email: string, input: UserUpdateInput): UserAccount {
     assertAdminPermission(actor);
     const user = this.getUserByEmail(email);
+
+    if (input.expectedUpdatedAt && user.updatedAt !== input.expectedUpdatedAt) {
+      throw conflict("User was updated by someone else. Reload and try again.", {
+        email: user.email,
+        expectedUpdatedAt: input.expectedUpdatedAt,
+        currentUpdatedAt: user.updatedAt
+      });
+    }
 
     if (typeof input.nickname === "string") {
       const trimmed = input.nickname.trim();
@@ -1078,9 +1108,17 @@ export class ProjectService {
     return user;
   }
 
-  knightDestroyer(actor: ActorContext, email: string): UserAccount {
+  knightDestroyer(actor: ActorContext, email: string, expectedUpdatedAt?: string): UserAccount {
     assertAdminPermission(actor);
     const user = this.getUserByEmail(email);
+
+    if (expectedUpdatedAt && user.updatedAt !== expectedUpdatedAt) {
+      throw conflict("User was updated by someone else. Reload and try again.", {
+        email: user.email,
+        expectedUpdatedAt,
+        currentUpdatedAt: user.updatedAt
+      });
+    }
 
     if (user.accessLevel !== "VOYEUR" || !user.destroyerAccessRequested) {
       throw badRequest("User must be a Voyeur with a pending Destroyer access request.");
@@ -1091,6 +1129,11 @@ export class ProjectService {
     user.updatedAt = new Date().toISOString();
     this.store.save();
     return user;
+  }
+
+  listAuditEvents(actor: ActorContext, limit?: number) {
+    assertAdminPermission(actor);
+    return this.store.listAuditEvents(limit);
   }
 
   getTemplateById(templateId: string): ProjectTemplate {
@@ -1123,6 +1166,14 @@ export class ProjectService {
   updateTemplate(actor: ActorContext, templateId: string, payload: ProjectTemplateUpdateInput): ProjectTemplate {
     assertTemplateEditPermission(actor);
     const template = this.getTemplateById(templateId);
+
+    if (payload.expectedUpdatedAt && template.updatedAt !== payload.expectedUpdatedAt) {
+      throw conflict("Template was updated by someone else. Reload and try again.", {
+        templateId,
+        expectedUpdatedAt: payload.expectedUpdatedAt,
+        currentUpdatedAt: template.updatedAt
+      });
+    }
 
     template.name = payload.name ?? template.name;
     template.description = payload.description ?? template.description;
@@ -1256,8 +1307,9 @@ export class ProjectService {
       scheduleDelayDays: 0,
       settings: baseSettings,
       status: "active",
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso(),
       createdBy: actor.userId,
+      updatedAt: nowIso(),
       source
     };
 
@@ -1272,6 +1324,14 @@ export class ProjectService {
     const project = this.store.projects.find((entry) => entry.id === projectId);
     if (!project) {
       throw notFound("Project not found.", { projectId });
+    }
+
+    if (input.expectedUpdatedAt && project.updatedAt !== input.expectedUpdatedAt) {
+      throw conflict("Project was updated by someone else. Reload and try again.", {
+        projectId,
+        expectedUpdatedAt: input.expectedUpdatedAt,
+        currentUpdatedAt: project.updatedAt
+      });
     }
 
     const nextName = input.name?.trim() ?? project.name;
@@ -1301,6 +1361,7 @@ export class ProjectService {
       validateSettings(project.settings);
     }
     project.status = input.status ?? project.status;
+    project.updatedAt = nowIso();
 
     this.applyScheduleAdjustment(project);
     this.store.save();
@@ -1324,6 +1385,7 @@ export class ProjectService {
     const shiftDays = weekShift * 7;
     project.releaseDate = formatIsoDate(addDays(parseIsoDate(project.releaseDate), shiftDays));
     this.applyScheduleAdjustment(project);
+    project.updatedAt = nowIso();
 
     const assignmentsForProject = this.store.assignments.filter((assignment) => assignment.projectId === projectId);
     assignmentsForProject.forEach((assignment) => {
@@ -1332,6 +1394,7 @@ export class ProjectService {
       const clamped = clampAssignmentToProjectWindow(project, shiftedStartDate, shiftedEndDate);
       assignment.startDate = clamped.startDate;
       assignment.endDate = clamped.endDate;
+      assignment.updatedAt = nowIso();
     });
 
     this.store.save();

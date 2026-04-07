@@ -2,7 +2,19 @@ import { Request, Response, Router } from "express";
 import { z } from "zod";
 import { ProjectionStore } from "../domain/store.js";
 import { ProjectService } from "../domain/project-service.js";
-import { AuthedRequest, getGoogleAuthConfig } from "./auth.js";
+import {
+  AuthedRequest,
+  clearSessionCookie,
+  createDevBypassSession,
+  createSessionFromGoogleToken,
+  destroySessionFromRequest,
+  establishSession,
+  getCsrfTokenForRequest,
+  getGoogleAuthConfig,
+  resolveSessionActorFromCookie
+} from "./auth.js";
+import { badRequest } from "../domain/errors.js";
+import { listLiveEdits, removeLiveEdit, upsertLiveEdit } from "./live-edit-hub.js";
 
 const workWeekSchema = z.object({
   timezone: z.string().min(1),
@@ -47,6 +59,7 @@ const templateUpdateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
   isActive: z.boolean().optional(),
+  expectedUpdatedAt: z.string().datetime().optional(),
   settings: z
     .object({
       defaultCapacityHoursPerDay: z.number().min(0.5).max(16).optional(),
@@ -97,7 +110,8 @@ const updateProjectSchema = z
         preProductionLengthDays: z.number().int().min(0).optional()
       })
       .optional(),
-    status: z.enum(["active", "completed"]).optional()
+    status: z.enum(["active", "completed"]).optional(),
+    expectedUpdatedAt: z.string().datetime().optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one field must be provided for update."
@@ -120,7 +134,8 @@ const personCreateSchema = z.object({
   primaryRoleCode: z.string().min(1),
   office: z.string().min(1),
   weeklyCapacityHours: z.number().positive().max(80),
-  workingDays: z.array(z.number().int().min(1).max(7)).min(1).optional()
+  workingDays: z.array(z.number().int().min(1).max(7)).min(1).optional(),
+  expectedUpdatedAt: z.string().datetime().optional()
 });
 
 const assignmentCreateSchema = z.object({
@@ -129,7 +144,8 @@ const assignmentCreateSchema = z.object({
   roleCode: z.string().min(1),
   allocationPercent: z.number().positive().max(100),
   startDate: z.string().date(),
-  endDate: z.string().date()
+  endDate: z.string().date(),
+  expectedUpdatedAt: z.string().datetime().optional()
 });
 
 const mappingSchema = z.object({
@@ -175,11 +191,33 @@ const emailParamSchema = z.object({
 const updateUserSchema = z
   .object({
     nickname: z.string().min(1).optional(),
-    accessLevel: z.enum(["VOYEUR", "DESTROYER", "ADMIN"]).optional()
+    accessLevel: z.enum(["VOYEUR", "DESTROYER", "ADMIN"]).optional(),
+    expectedUpdatedAt: z.string().datetime().optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one field must be provided for update."
   });
+
+const knightDestroyerSchema = z.object({
+  expectedUpdatedAt: z.string().datetime().optional()
+});
+
+const googleSessionSchema = z.object({
+  idToken: z.string().min(1)
+});
+
+const auditLogQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(1000).optional()
+});
+
+const liveEditUpsertSchema = z.object({
+  key: z.string().trim().min(1).max(180),
+  label: z.string().trim().max(120).optional()
+});
+
+const liveEditPathSchema = z.object({
+  key: z.string().trim().min(1).max(260)
+});
 
 const getActor = (req: Request) => (req as AuthedRequest).actor;
 
@@ -205,6 +243,49 @@ export const createRouter = (store: ProjectionStore) => {
     res.status(200).json(getGoogleAuthConfig());
   });
 
+  router.get("/api/v1/auth/session", (req: Request, res: Response) => {
+    const actor = resolveSessionActorFromCookie(store, req.header("cookie"));
+    res.status(200).json({
+      authenticated: Boolean(actor),
+      userId: actor?.userId ?? null,
+      accessLevel: actor?.accessLevel ?? null
+    });
+  });
+
+  router.post("/api/v1/auth/google/session", (req: Request, res: Response, next) => {
+    const body = googleSessionSchema.parse(req.body);
+    createSessionFromGoogleToken(store, body.idToken)
+      .then(({ actor, sessionId }) => {
+        establishSession(res, sessionId);
+        res.status(200).json(projectService.getUserByEmail(actor.userId));
+      })
+      .catch((error) => next(error));
+  });
+
+  router.post("/api/v1/auth/dev-bypass", (_req: Request, res: Response, next) => {
+    try {
+      const { actor, sessionId } = createDevBypassSession(store);
+      establishSession(res, sessionId);
+      res.status(200).json(projectService.getUserByEmail(actor.userId));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/api/v1/auth/logout", (req: Request, res: Response) => {
+    destroySessionFromRequest(req);
+    clearSessionCookie(res);
+    res.status(204).send();
+  });
+
+  router.get("/api/v1/auth/csrf", (req: Request, res: Response) => {
+    const token = getCsrfTokenForRequest(req);
+    if (!token) {
+      throw badRequest("No active session available for CSRF token.");
+    }
+    res.status(200).json({ token });
+  });
+
   router.get("/api/v1/users/me", (req: Request, res: Response) => {
     res.status(200).json(projectService.getCurrentUser(getActor(req)));
   });
@@ -225,7 +306,34 @@ export const createRouter = (store: ProjectionStore) => {
 
   router.post("/api/v1/admin/users/:email/knight-destroyer", (req: Request, res: Response) => {
     const { email } = emailParamSchema.parse(req.params);
-    res.status(200).json(projectService.knightDestroyer(getActor(req), email));
+    const body = knightDestroyerSchema.parse(req.body ?? {});
+    res.status(200).json(projectService.knightDestroyer(getActor(req), email, body.expectedUpdatedAt));
+  });
+
+  router.get("/api/v1/admin/audit-log", (req: Request, res: Response) => {
+    const { limit } = auditLogQuerySchema.parse(req.query);
+    res.status(200).json(projectService.listAuditEvents(getActor(req), limit));
+  });
+
+  router.get("/api/v1/collab/editing", (req: Request, res: Response) => {
+    const actorId = getActor(req).userId;
+    res.status(200).json(listLiveEdits(actorId));
+  });
+
+  router.post("/api/v1/collab/editing", (req: Request, res: Response) => {
+    const body = liveEditUpsertSchema.parse(req.body);
+    const actorId = getActor(req).userId;
+    const result = upsertLiveEdit(body.key, actorId, body.label);
+    res.status(200).json({ key: body.key, conflict: result.conflict });
+  });
+
+  router.delete("/api/v1/collab/editing/:key", (req: Request, res: Response) => {
+    const { key } = liveEditPathSchema.parse(req.params);
+    const decodedKey = decodeURIComponent(key);
+    const actorId = getActor(req).userId;
+    removeLiveEdit(decodedKey, actorId);
+
+    res.status(204).send();
   });
 
   router.get("/api/v1/project-templates", (_req: Request, res: Response) => {

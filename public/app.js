@@ -16,7 +16,6 @@ const el = {
   showMappingsView: document.querySelector('#showMappingsView'),
   showUserManagementView: document.querySelector('#showUserManagementView'),
   requestDestroyerAccess: document.querySelector('#requestDestroyerAccess'),
-  showPlanningFromOverview: document.querySelector('#showPlanningFromOverview'),
   heatmapView: document.querySelector('#heatmapView'),
   roadmapView: document.querySelector('#roadmapView'),
   projectsView: document.querySelector('#projectsView'),
@@ -35,7 +34,9 @@ const el = {
   addPersonRow: document.querySelector('#addPersonRow'),
   loadUtilization: document.querySelector('#loadUtilization'),
   projectHeatmapDensityPresets: document.querySelector('#projectHeatmapDensityPresets'),
+  personnelHeatmapDensityPresets: document.querySelector('#personnelHeatmapDensityPresets'),
   projectOverviewStatusFilter: document.querySelector('#projectOverviewStatusFilter'),
+  personnelOverviewStatusFilter: document.querySelector('#personnelOverviewStatusFilter'),
   utilizationSummary: document.querySelector('#utilizationSummary'),
   utilizationTimeline: document.querySelector('#utilizationTimeline'),
   projectTimelineSummary: document.querySelector('#projectTimelineSummary'),
@@ -53,12 +54,19 @@ const el = {
   officesList: document.querySelector('#officesList'),
   addOfficeRow: document.querySelector('#addOfficeRow'),
   loadUsers: document.querySelector('#loadUsers'),
+  loadAuditLog: document.querySelector('#loadAuditLog'),
   usersList: document.querySelector('#usersList'),
+  auditLogList: document.querySelector('#auditLogList'),
   responseLog: document.querySelector('#responseLog'),
   confirmDialog: document.querySelector('#confirmDialog'),
   confirmDialogMessage: document.querySelector('#confirmDialogMessage'),
   confirmChangeConfirm: document.querySelector('#confirmChangeConfirm'),
-  confirmChangeCancel: document.querySelector('#confirmChangeCancel')
+  confirmChangeCancel: document.querySelector('#confirmChangeCancel'),
+  conflictDialog: document.querySelector('#conflictDialog'),
+  conflictDialogMessage: document.querySelector('#conflictDialogMessage'),
+  conflictAttemptedPayload: document.querySelector('#conflictAttemptedPayload'),
+  conflictLatestPayload: document.querySelector('#conflictLatestPayload'),
+  conflictDialogClose: document.querySelector('#conflictDialogClose')
 };
 
 const state = {
@@ -71,8 +79,7 @@ const state = {
   mappings: [],
   mappingTables: [],
   googleConfig: null,
-  googleIdToken: sessionStorage.getItem('projection_google_id_token'),
-  googleEmail: sessionStorage.getItem('projection_google_email'),
+  csrfToken: null,
   utilization: null,
   utilizationTimeline: null,
   projectUtilizationTimeline: null,
@@ -87,16 +94,30 @@ const state = {
   editingMappingId: null,
   projectAssignmentEditor: null,
   projectAssignmentDateSelection: null,
+  roadmapRoleEditor: null,
   projectHeatmapDensity: 'medium',
+  personnelHeatmapDensity: 'medium',
   projectOverviewFilter: 'active',
   currentUser: null,
-  users: []
+  users: [],
+  auditEvents: [],
+  liveEditing: []
 };
 
-const AUTH_TOKEN_KEY = 'projection_google_id_token';
-const AUTH_EMAIL_KEY = 'projection_google_email';
+const LIVE_EDIT_HEARTBEAT_MS = 5000;
+const LIVE_EDIT_FALLBACK_POLL_MS = 8000;
+const LIVE_EDIT_WS_RETRY_MS = 2500;
+const localEditingKeys = new Set();
+let liveEditFallbackPollTimer = null;
+let liveEditHeartbeatTimer = null;
+let liveEditSocket = null;
+let liveEditSocketRetryTimer = null;
+
 const THEME_MODE_KEY = 'projection_theme_mode';
 const HEATMAP_DENSITY_KEY = 'projection_project_heatmap_density';
+const PERSONNEL_DENSITY_KEY = 'projection_personnel_heatmap_density';
+const PROJECT_LIST_COLUMNS_KEY = 'projection_projects_list_columns';
+const ROADMAP_LIST_COLUMNS_KEY = 'projection_roadmap_list_columns';
 const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
 const HEATMAP_DENSITY_WIDTH = {
@@ -106,6 +127,86 @@ const HEATMAP_DENSITY_WIDTH = {
 };
 
 const APP_VIEWS = new Set(['heatmap', 'roadmap', 'projects', 'personnel', 'planning', 'mappings', 'users']);
+
+const parseStoredColumnWidths = (storageKey) => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+state.projectsColumnWidths = parseStoredColumnWidths(PROJECT_LIST_COLUMNS_KEY);
+state.roadmapColumnWidths = parseStoredColumnWidths(ROADMAP_LIST_COLUMNS_KEY);
+
+const clampColumnWidth = (value, min = 10, max = 760) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return min;
+  }
+  return Math.min(max, Math.max(min, Math.round(numeric)));
+};
+
+const resolveColumnWidth = (widthMap, key, fallback, minWidth = 10) =>
+  clampColumnWidth(widthMap?.[key] ?? fallback, minWidth);
+
+const storeColumnWidths = (storageKey, widths) => {
+  localStorage.setItem(storageKey, JSON.stringify(widths));
+};
+
+const buildResizableListHeader = (listType, columns, widthMap, extraClass = '') => {
+  const template = columns
+    .map((column) => `${resolveColumnWidth(widthMap, column.key, column.defaultWidth, column.minWidth)}px`)
+    .join(' ');
+
+  const cells = columns
+    .map((column) => `
+      <span class="resizable-head-cell ${column.headClass || ''}" data-col-key="${column.key}">
+        <span class="resizable-head-label">${escapeHtml(column.label)}</span>
+        <button
+          type="button"
+          class="col-resize-handle"
+          data-list-type="${listType}"
+          data-col-key="${column.key}"
+          aria-label="Resize ${escapeHtml(column.label)} column"
+          title="Drag to resize column"
+        ><span class="col-resize-icon" aria-hidden="true">↔</span></button>
+      </span>
+    `)
+    .join('');
+
+  return {
+    template,
+    html: `<div class="list-header ${extraClass}" style="grid-template-columns: ${template};">${cells}</div>`
+  };
+};
+
+const startColumnResize = (listType, columnKey, startX, startWidth) => {
+  const widthMap = listType === 'projects' ? state.projectsColumnWidths : state.roadmapColumnWidths;
+  const storageKey = listType === 'projects' ? PROJECT_LIST_COLUMNS_KEY : ROADMAP_LIST_COLUMNS_KEY;
+
+  const onPointerMove = (moveEvent) => {
+    const delta = moveEvent.clientX - startX;
+    widthMap[columnKey] = clampColumnWidth(startWidth + delta);
+    storeColumnWidths(storageKey, widthMap);
+    if (listType === 'projects') {
+      renderProjects();
+    } else {
+      renderRoadmapProjects();
+    }
+  };
+
+  const onPointerUp = () => {
+    document.body.style.userSelect = '';
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', onPointerUp);
+  };
+
+  document.body.style.userSelect = 'none';
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+};
 
 const normalizeThemeMode = (value) => (value === 'light' || value === 'dark' || value === 'system' ? value : 'system');
 const resolvedTheme = (mode) => (mode === 'system' ? (darkModeQuery.matches ? 'dark' : 'light') : mode);
@@ -148,13 +249,14 @@ const initializeThemeMode = () => {
 };
 
 const redirectToLogin = (reason = '') => {
+  stopLiveEditingLoop();
   const url = reason ? `/login.html?reason=${encodeURIComponent(reason)}` : '/login.html';
   window.location.href = url;
 };
 
 const apiHeaders = () => ({
   'Content-Type': 'application/json',
-  ...(state.googleIdToken ? { Authorization: `Bearer ${state.googleIdToken}` } : {}),
+  ...(state.csrfToken ? { 'x-csrf-token': state.csrfToken } : {}),
   'x-user-id': el.userId.value.trim() || 'demo-user',
   'x-user-role': el.userRole.value.trim() || 'PROJECT_OWNER'
 });
@@ -162,8 +264,6 @@ const apiHeaders = () => ({
 const renderAuthStatus = () => {
   if (state.currentUser) {
     el.authStatus.textContent = `Signed in as ${state.currentUser.email} (${state.currentUser.accessLevel})`;
-  } else if (state.googleEmail) {
-    el.authStatus.textContent = `Signed in as ${state.googleEmail}`;
   } else if (state.googleConfig?.enabled) {
     el.authStatus.textContent = `Not signed in (allowed domain: @${state.googleConfig.allowedEmailDomain})`;
   } else {
@@ -221,7 +321,7 @@ const syncRoleEchoFields = () => {
     return;
   }
 
-  el.userId.value = state.currentUser?.email || state.googleEmail || 'demo-user';
+  el.userId.value = state.currentUser?.email || 'demo-user';
   if (state.currentUser?.accessLevel === 'ADMIN') {
     el.userRole.value = 'SYSTEM_ADMIN,PROJECT_OWNER';
   } else if (state.currentUser?.accessLevel === 'DESTROYER') {
@@ -252,7 +352,6 @@ const syncUserManagementTabVisibility = () => {
 const syncPlanningVisibility = () => {
   const allowed = canEditData();
   el.showPlanningView.classList.toggle('hidden-view', !allowed);
-  el.showPlanningFromOverview?.classList.toggle('hidden-view', !allowed);
   if (!allowed && state.activeView === 'planning') {
     setActiveView('heatmap', { updateHistory: true, replaceHistory: true });
   }
@@ -270,6 +369,7 @@ const clearDataViews = () => {
   state.projectUtilizationTimeline = null;
   state.globalClosures = [];
   state.users = [];
+  state.auditEvents = [];
   state.currentUser = null;
 
   renderTemplates();
@@ -282,17 +382,32 @@ const clearDataViews = () => {
   renderProjectUtilizationTimeline();
   renderClosures();
   renderUsers();
+  renderAuditLog();
 };
 
-const decodeJwtEmail = (token) => {
-  try {
-    const payload = token.split('.')[1];
-    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
-    const decoded = JSON.parse(atob(normalized));
-    return decoded.email || null;
-  } catch {
-    return null;
+const renderAuditLog = () => {
+  if (!el.auditLogList) {
+    return;
   }
+
+  if (!state.auditEvents.length) {
+    el.auditLogList.innerHTML = `${listHeaderHtml(['When', 'Actor', 'Method', 'Path', 'Status'])}<p>No audit events yet.</p>`;
+    return;
+  }
+
+  el.auditLogList.innerHTML =
+    listHeaderHtml(['When', 'Actor', 'Method', 'Path', 'Status']) +
+    state.auditEvents
+      .map((event) => `
+        <div class="list-row list-row-users">
+          <span class="list-cell meta">${escapeHtml(event.createdAt)}</span>
+          <span class="list-cell">${escapeHtml(event.actor)}</span>
+          <span class="list-cell meta">${escapeHtml(event.method)}</span>
+          <span class="list-cell">${escapeHtml(event.path)}</span>
+          <span class="list-cell meta">${escapeHtml(String(event.status))}</span>
+        </div>
+      `)
+      .join('');
 };
 
 const initializeGoogleAuth = async () => {
@@ -312,13 +427,348 @@ const initializeGoogleAuth = async () => {
   renderAuthStatus();
 };
 
+const ensureCsrfToken = async () => {
+  if (state.csrfToken) {
+    return state.csrfToken;
+  }
+
+  const response = await fetch('/api/v1/auth/csrf', {
+    method: 'GET',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const body = await response.json();
+  state.csrfToken = String(body?.token || '');
+  return state.csrfToken || null;
+};
+
+const closeConflictDialog = () => {
+  if (!(el.conflictDialog instanceof HTMLElement)) {
+    return;
+  }
+  el.conflictDialog.classList.add('hidden-view');
+};
+
+const openConflictDialog = ({ message, attempted, latest }) => {
+  if (!(el.conflictDialog instanceof HTMLElement)) {
+    return;
+  }
+
+  if (el.conflictDialogMessage instanceof HTMLElement) {
+    el.conflictDialogMessage.textContent = message;
+  }
+  if (el.conflictAttemptedPayload instanceof HTMLElement) {
+    el.conflictAttemptedPayload.textContent = JSON.stringify(attempted ?? {}, null, 2);
+  }
+  if (el.conflictLatestPayload instanceof HTMLElement) {
+    el.conflictLatestPayload.textContent = JSON.stringify(latest ?? {}, null, 2);
+  }
+
+  el.conflictDialog.classList.remove('hidden-view');
+  if (el.conflictDialogClose instanceof HTMLButtonElement) {
+    el.conflictDialogClose.focus();
+  }
+};
+
+const parseAttemptedPayload = (options) => {
+  const raw = options?.body;
+  if (!raw || typeof raw !== 'string') {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+const fetchLatestConflictEntity = async (url) => {
+  const projectMatch = url.match(/^\/api\/v1\/projects\/([^/?#]+)/i);
+  if (projectMatch) {
+    const projectId = decodeURIComponent(projectMatch[1]);
+    const projects = await fetchJson('/api/v1/projects', { method: 'GET' });
+    return projects.find((entry) => entry.id === projectId) || null;
+  }
+
+  const personMatch = url.match(/^\/api\/v1\/people\/([^/?#]+)/i);
+  if (personMatch) {
+    const personId = decodeURIComponent(personMatch[1]);
+    const people = await fetchJson('/api/v1/people', { method: 'GET' });
+    return people.find((entry) => entry.id === personId) || null;
+  }
+
+  const assignmentMatch = url.match(/^\/api\/v1\/assignments\/([^/?#]+)/i);
+  if (assignmentMatch) {
+    const assignmentId = decodeURIComponent(assignmentMatch[1]);
+    const assignments = await fetchJson('/api/v1/assignments', { method: 'GET' });
+    return assignments.find((entry) => entry.id === assignmentId) || null;
+  }
+
+  const templateMatch = url.match(/^\/api\/v1\/project-templates\/([^/?#]+)/i);
+  if (templateMatch) {
+    const templateId = decodeURIComponent(templateMatch[1]);
+    return await fetchJson(`/api/v1/project-templates/${encodeURIComponent(templateId)}`, { method: 'GET' });
+  }
+
+  const userMatch = url.match(/^\/api\/v1\/admin\/users\/([^/?#]+)/i);
+  if (userMatch) {
+    const email = decodeURIComponent(userMatch[1]).toLowerCase();
+    const users = await fetchJson('/api/v1/admin/users', { method: 'GET' });
+    return users.find((entry) => String(entry.email || '').toLowerCase() === email) || null;
+  }
+
+  return null;
+};
+
+const explainConflict = (payload) => {
+  const detail = String(payload?.detail || '').trim();
+  if (detail) {
+    return detail;
+  }
+  return 'Someone else changed this record before you saved. Your data was not overwritten.';
+};
+
+const handleConflictResponse = async (url, payload, options = {}) => {
+  const message = explainConflict(payload);
+  const attempted = parseAttemptedPayload(options);
+  let latest = payload?.context || null;
+
+  try {
+    const fetched = await fetchLatestConflictEntity(url);
+    if (fetched) {
+      latest = fetched;
+    }
+  } catch {
+    // Best effort: we still show conflict context even if latest fetch fails.
+  }
+
+  log('Conflict detected', { url, detail: message, attempted, latest });
+  openConflictDialog({ message, attempted, latest });
+
+  try {
+    await refreshAll();
+  } catch {
+    // Ignore refresh failures; caller still receives the original conflict error.
+  }
+};
+
+const buildEditKey = (kind, id) => `${kind}:${id}`;
+
+const applyLiveEditHighlights = () => {
+  const activeMap = new Map(state.liveEditing.map((entry) => [entry.key, entry]));
+  document.querySelectorAll('[data-edit-key]').forEach((node) => {
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+
+    const key = String(node.dataset.editKey || '');
+    const active = activeMap.get(key);
+    node.classList.remove('live-edit-active', 'live-edit-remote');
+    node.removeAttribute('title');
+
+    if (!active) {
+      return;
+    }
+
+    node.classList.add('live-edit-active');
+    if (!active.mine) {
+      node.classList.add('live-edit-remote');
+    }
+    node.title = `${active.actor} is editing`;
+  });
+};
+
+const applyIncomingLiveEdits = (entries) => {
+  state.liveEditing = Array.isArray(entries) ? entries : [];
+  applyLiveEditHighlights();
+};
+
+const stopFallbackLiveEditPolling = () => {
+  if (!liveEditFallbackPollTimer) {
+    return;
+  }
+
+  window.clearInterval(liveEditFallbackPollTimer);
+  liveEditFallbackPollTimer = null;
+};
+
+const startFallbackLiveEditPolling = () => {
+  if (liveEditFallbackPollTimer) {
+    return;
+  }
+
+  loadLiveEditing().catch(() => null);
+  liveEditFallbackPollTimer = window.setInterval(() => {
+    loadLiveEditing().catch(() => null);
+  }, LIVE_EDIT_FALLBACK_POLL_MS);
+};
+
+const scheduleLiveEditSocketReconnect = () => {
+  if (liveEditSocketRetryTimer) {
+    return;
+  }
+
+  liveEditSocketRetryTimer = window.setTimeout(() => {
+    liveEditSocketRetryTimer = null;
+    connectLiveEditSocket();
+  }, LIVE_EDIT_WS_RETRY_MS);
+};
+
+const connectLiveEditSocket = () => {
+  if (liveEditSocket || !state.currentUser?.email) {
+    return;
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const wsUrl = `${protocol}://${window.location.host}/ws`;
+  const socket = new WebSocket(wsUrl);
+  liveEditSocket = socket;
+
+  socket.addEventListener('open', () => {
+    stopFallbackLiveEditPolling();
+    if (liveEditSocketRetryTimer) {
+      window.clearTimeout(liveEditSocketRetryTimer);
+      liveEditSocketRetryTimer = null;
+    }
+  });
+
+  socket.addEventListener('message', (event) => {
+    try {
+      const payload = JSON.parse(String(event.data || '{}'));
+      if (payload?.type === 'live-edit:init' || payload?.type === 'live-edit:update') {
+        applyIncomingLiveEdits(payload.entries || []);
+      }
+    } catch {
+      // Ignore malformed websocket payloads.
+    }
+  });
+
+  socket.addEventListener('close', () => {
+    if (liveEditSocket === socket) {
+      liveEditSocket = null;
+    }
+    startFallbackLiveEditPolling();
+    scheduleLiveEditSocketReconnect();
+  });
+
+  socket.addEventListener('error', () => {
+    socket.close();
+  });
+};
+
+const heartbeatLocalEditingKeys = async () => {
+  const keys = [...localEditingKeys.values()];
+  if (!keys.length) {
+    return;
+  }
+
+  await Promise.all(
+    keys.map((key) =>
+      fetchJson('/api/v1/collab/editing', {
+        method: 'POST',
+        body: JSON.stringify({ key })
+      }).catch(() => null)
+    )
+  );
+};
+
+const loadLiveEditing = async () => {
+  const entries = await fetchJson('/api/v1/collab/editing', { method: 'GET' });
+  applyIncomingLiveEdits(entries);
+};
+
+const announceEditingStart = async (key) => {
+  if (!key) {
+    return;
+  }
+  localEditingKeys.add(key);
+  state.liveEditing = [
+    ...state.liveEditing.filter((entry) => entry.key !== key),
+    {
+      key,
+      actor: state.currentUser?.email || 'current-user',
+      label: key,
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      mine: true
+    }
+  ];
+  applyLiveEditHighlights();
+  await fetchJson('/api/v1/collab/editing', {
+    method: 'POST',
+    body: JSON.stringify({ key })
+  });
+};
+
+const announceEditingStop = async (key) => {
+  if (!key) {
+    return;
+  }
+  localEditingKeys.delete(key);
+  state.liveEditing = state.liveEditing.filter((entry) => entry.key !== key);
+  applyLiveEditHighlights();
+  await fetchJson(`/api/v1/collab/editing/${encodeURIComponent(key)}`, {
+    method: 'DELETE'
+  }).catch(() => null);
+};
+
+const startLiveEditingLoop = () => {
+  if (liveEditHeartbeatTimer) {
+    return;
+  }
+
+  loadLiveEditing().catch(() => null);
+  connectLiveEditSocket();
+  liveEditHeartbeatTimer = window.setInterval(() => {
+    heartbeatLocalEditingKeys().catch(() => null);
+  }, LIVE_EDIT_HEARTBEAT_MS);
+};
+
+const stopLiveEditingLoop = () => {
+  stopFallbackLiveEditPolling();
+
+  if (liveEditHeartbeatTimer) {
+    window.clearInterval(liveEditHeartbeatTimer);
+    liveEditHeartbeatTimer = null;
+  }
+
+  if (liveEditSocketRetryTimer) {
+    window.clearTimeout(liveEditSocketRetryTimer);
+    liveEditSocketRetryTimer = null;
+  }
+
+  if (liveEditSocket) {
+    liveEditSocket.close();
+    liveEditSocket = null;
+  }
+
+  localEditingKeys.clear();
+  state.liveEditing = [];
+  applyLiveEditHighlights();
+};
+
 const log = (label, payload) => {
   el.responseLog.textContent = `${label}\n${JSON.stringify(payload, null, 2)}`;
 };
 
 const fetchJson = async (url, options = {}) => {
+  const method = String(options.method || 'GET').toUpperCase();
+  const isMutation = method === 'POST' || method === 'PATCH' || method === 'PUT' || method === 'DELETE';
+  if (isMutation) {
+    await ensureCsrfToken();
+  }
+
   const response = await fetch(url, {
     ...options,
+    credentials: 'same-origin',
     headers: {
       ...apiHeaders(),
       ...(options.headers || {})
@@ -330,11 +780,14 @@ const fetchJson = async (url, options = {}) => {
 
   if (!response.ok) {
     if (response.status === 401) {
-      sessionStorage.removeItem(AUTH_TOKEN_KEY);
-      sessionStorage.removeItem(AUTH_EMAIL_KEY);
-      state.googleIdToken = null;
-      state.googleEmail = null;
+      state.csrfToken = null;
       redirectToLogin('expired');
+    }
+    if (response.status === 403 && isMutation) {
+      state.csrfToken = null;
+    }
+    if (response.status === 409) {
+      await handleConflictResponse(url, body || {}, options);
     }
     throw body || { status: response.status, detail: response.statusText };
   }
@@ -429,12 +882,17 @@ const formatLocalDate = (isoDate) => {
   }
 
   const date = new Date(`${isoDate}T00:00:00Z`);
-  return new Intl.DateTimeFormat(undefined, {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const daysUntil = diffDaysIso(isoDate, todayIso);
+  const tone = daysUntil < 0 ? 'past' : daysUntil <= 7 ? 'soon' : 'future';
+  const formatted = new Intl.DateTimeFormat(undefined, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     timeZone: 'UTC'
   }).format(date);
+
+  return `<span class="date-visual date-${tone}">${formatted}</span>`;
 };
 
 const certificationDateFromInputs = (releaseDate, exclusiveLeadWeeks, certificationLeadWeeks) => {
@@ -514,7 +972,8 @@ const projectMilestones = (project) => {
 const listHeaderHtml = (labels) => `<div class="list-header">${labels.map((label) => `<span>${label}</span>`).join('')}</div>`;
 
 const templateInlineEditorHtml = (template) => `
-  <form class="template-inline-form subform" data-template-id="${template.id}">
+  <form class="template-inline-form subform" data-template-id="${template.id}" data-edit-key="${buildEditKey('template', template.id)}">
+     <input name="expectedUpdatedAt" type="hidden" value="${escapeHtml(template.updatedAt || '')}" />
     <label>
       Name
       <input name="name" value="${escapeHtml(template.name)}" required />
@@ -610,6 +1069,7 @@ const renderTemplates = () => {
 
   if (!state.templates.length) {
     el.templatesList.innerHTML = `${listHeaderHtml(['Name', 'Description', 'Notification', 'Exclusive', 'Certification', 'Production', 'Pre-Prod', 'Actions'])}${createRowHtml}<p>No active templates.</p>`;
+    applyLiveEditHighlights();
     return;
   }
 
@@ -620,11 +1080,11 @@ const renderTemplates = () => {
     .map(
       (template) => {
         if (state.editingTemplateId === template.id) {
-          return `<div class="list-row list-row-template editing">${templateInlineEditorHtml(template)}</div>`;
+          return `<div class="list-row list-row-template editing" data-edit-key="${buildEditKey('template', template.id)}">${templateInlineEditorHtml(template)}</div>`;
         }
 
         return `
-          <div class="list-row list-row-template">
+          <div class="list-row list-row-template" data-edit-key="${buildEditKey('template', template.id)}">
             <span class="list-cell list-cell-strong">${escapeHtml(template.name)}</span>
             <span class="list-cell">${escapeHtml(template.description || 'No description')}</span>
             <span class="list-cell meta">${template.settings.notificationProfile}</span>
@@ -638,6 +1098,7 @@ const renderTemplates = () => {
       }
     )
     .join('');
+  applyLiveEditHighlights();
 };
 
 const openTemplateEditor = (templateId) => {
@@ -646,17 +1107,28 @@ const openTemplateEditor = (templateId) => {
     return;
   }
 
+  if (state.editingTemplateId && state.editingTemplateId !== templateId) {
+    announceEditingStop(buildEditKey('template', state.editingTemplateId)).catch(() => null);
+  }
   state.creatingTemplateRow = false;
   state.editingTemplateId = templateId;
+  announceEditingStart(buildEditKey('template', templateId)).catch(() => null);
   renderTemplates();
 };
 
 const closeTemplateEditor = () => {
+  const previous = state.editingTemplateId;
   state.editingTemplateId = null;
+  if (previous) {
+    announceEditingStop(buildEditKey('template', previous)).catch(() => null);
+  }
   renderTemplates();
 };
 
 const openTemplateCreator = () => {
+  if (state.editingTemplateId) {
+    announceEditingStop(buildEditKey('template', state.editingTemplateId)).catch(() => null);
+  }
   state.editingTemplateId = null;
   state.creatingTemplateRow = true;
   renderTemplates();
@@ -673,7 +1145,8 @@ const projectInlineEditorHtml = (project) => {
   const certificationLeadWeeks = daysToWeeks(project.settings.milestoneOffsets.certificationLeadDays);
 
   return `
-  <form class="project-inline-form subform" data-project-id="${project.id}">
+  <form class="project-inline-form subform" data-project-id="${project.id}" data-edit-key="${buildEditKey('project', project.id)}">
+     <input name="expectedUpdatedAt" type="hidden" value="${escapeHtml(project.updatedAt || '')}" />
     <label>
       Name
       <input name="name" value="${escapeHtml(project.name)}" required />
@@ -721,7 +1194,7 @@ const projectInlineEditorHtml = (project) => {
 
 const projectInlineCreateHtml = () => `
   <form class="project-inline-form subform" data-new="true">
-    <label>
+     <label>
       Name
       <input name="name" required />
     </label>
@@ -757,6 +1230,56 @@ const projectInlineCreateHtml = () => `
     </div>
   </form>
 `;
+
+const projectRoadmapInlineEditorHtml = (project) => {
+  const exclusiveLeadWeeks = daysToWeeks(project.settings.milestoneOffsets.exclusiveLeadDays);
+  const certificationLeadWeeks = daysToWeeks(project.settings.milestoneOffsets.certificationLeadDays);
+
+  return `
+  <form class="project-inline-form subform" data-project-id="${project.id}" data-edit-key="${buildEditKey('project', project.id)}">
+     <input name="expectedUpdatedAt" type="hidden" value="${escapeHtml(project.updatedAt || '')}" />
+    <label>
+      Name
+      <input name="name" value="${escapeHtml(project.name)}" required />
+    </label>
+    <label>
+      Status
+      <select name="status">
+        <option value="active" ${project.status === 'active' ? 'selected' : ''}>active</option>
+        <option value="completed" ${project.status === 'completed' ? 'selected' : ''}>completed</option>
+      </select>
+    </label>
+    <label>
+      Start (Pre-Production)
+      <input name="preProductionLengthWeeks" type="text" inputmode="decimal" data-week-display="true" value="${formatWeekInputValue(daysToWeeks(project.settings.milestoneOffsets.preProductionLengthDays))}" required />
+    </label>
+    <label>
+      Start (Production)
+      <input name="productionLengthWeeks" type="text" inputmode="decimal" data-week-display="true" value="${formatWeekInputValue(daysToWeeks(project.settings.milestoneOffsets.productionLengthDays))}" required />
+    </label>
+    <label>
+      Certification Lead
+      <input name="certificationLeadWeeks" type="text" inputmode="decimal" data-week-display="true" value="${formatWeekInputValue(certificationLeadWeeks)}" required />
+    </label>
+    <label>
+      Exclusive Lead
+      <input name="exclusiveLeadWeeks" type="text" inputmode="decimal" data-week-display="true" value="${formatWeekInputValue(exclusiveLeadWeeks)}" required />
+    </label>
+    <label>
+      Live Date
+      <input name="releaseDate" type="date" value="${project.releaseDate || project.targetEndDate}" required />
+    </label>
+    <label>
+      Comments
+      <input name="comments" value="${escapeHtml(project.comments || '')}" />
+    </label>
+    <div class="actions align-end project-inline-actions">
+      <button type="button" data-action="cancel-project-edit">Cancel</button>
+      <button class="primary" type="submit">Save Project</button>
+    </div>
+  </form>
+`;
+};
 
 const updateProjectFormMilestonePreviews = (form, changedField = 'releaseDate') => {
   if (!(form instanceof HTMLFormElement)) {
@@ -809,8 +1332,21 @@ const updateProjectFormMilestonePreviews = (form, changedField = 'releaseDate') 
 };
 
 const renderProjects = () => {
+  const projectColumns = [
+    { key: 'name', label: 'Name', defaultWidth: 220, minWidth: 10 },
+    { key: 'preprod', label: 'Pre-Prod', defaultWidth: 106, minWidth: 10 },
+    { key: 'prodstart', label: 'Prod Start', defaultWidth: 106, minWidth: 10 },
+    { key: 'cert', label: 'Cert', defaultWidth: 96, minWidth: 10 },
+    { key: 'exclusive', label: 'Exclusive', defaultWidth: 106, minWidth: 10 },
+    { key: 'release', label: 'Release', defaultWidth: 106, minWidth: 10 },
+    { key: 'status', label: 'Status', defaultWidth: 84, minWidth: 10 },
+    { key: 'actions', label: 'Actions', defaultWidth: 128, minWidth: 10 }
+  ];
+  const projectsHeader = buildResizableListHeader('projects', projectColumns, state.projectsColumnWidths, 'projects-list-header');
+
   if (!state.projects.length) {
-    el.overviewProjectsList.innerHTML = `${listHeaderHtml(['Name', 'Pre-Prod', 'Prod Start', 'Cert', 'Exclusive', 'Release', 'Status', 'Actions'])}<p>No projects available.</p>`;
+    el.overviewProjectsList.innerHTML = `${projectsHeader.html}<p>No projects available.</p>`;
+    applyLiveEditHighlights();
     return;
   }
 
@@ -819,7 +1355,7 @@ const renderProjects = () => {
     : '';
 
   el.overviewProjectsList.innerHTML =
-    listHeaderHtml(['Name', 'Pre-Prod', 'Prod Start', 'Cert', 'Exclusive', 'Release', 'Status', 'Actions']) +
+    projectsHeader.html +
     createRowHtml +
     state.projects
     .map(
@@ -827,14 +1363,14 @@ const renderProjects = () => {
         const milestones = projectMilestones(project);
         if (state.editingProjectId === project.id) {
           return `
-            <div class="list-row list-row-projects editing">
+            <div class="list-row list-row-projects editing" data-edit-key="${buildEditKey('project', project.id)}">
               ${projectInlineEditorHtml(project)}
             </div>
           `;
         }
 
         return `
-          <div class="list-row list-row-projects">
+          <div class="list-row list-row-projects" data-edit-key="${buildEditKey('project', project.id)}" style="grid-template-columns: ${projectsHeader.template};">
             <span class="list-cell list-cell-strong">${escapeHtml(project.name)}</span>
             <span class="list-cell meta">${formatLocalDate(milestones.preProductionStartDate)}</span>
             <span class="list-cell meta">${formatLocalDate(milestones.productionStartDate)}</span>
@@ -850,6 +1386,7 @@ const renderProjects = () => {
       }
     )
     .join('');
+  applyLiveEditHighlights();
 };
 
 const projectStudioLabel = (project) => {
@@ -869,13 +1406,177 @@ const projectStudioLabel = (project) => {
 
 const projectComments = (project) => String(project.comments || '').trim();
 
+const roadmapRoleColumns = (projects) => {
+  const projectIds = new Set(projects.map((project) => project.id));
+  const roleCodes = [...new Set(
+    state.assignments
+      .filter((assignment) => projectIds.has(assignment.projectId))
+      .map((assignment) => assignment.roleCode)
+      .filter(Boolean)
+  )].filter((roleCode) =>
+    state.assignments.some((assignment) => {
+      if (!projectIds.has(assignment.projectId) || assignment.roleCode !== roleCode) {
+        return false;
+      }
+
+      const personName = state.people.find((person) => person.id === assignment.personId)?.name || '';
+      return personName.trim().length > 0;
+    })
+  );
+
+  return roleCodes
+    .map((code) => {
+      const role = state.roles.find((entry) => entry.code === code);
+      return {
+        code,
+        label: role?.label || code
+      };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
+};
+
+const roadmapRoleNamesForProject = (projectId, roleCode) => {
+  const names = state.assignments
+    .filter((assignment) => assignment.projectId === projectId && assignment.roleCode === roleCode)
+    .map((assignment) => state.people.find((person) => person.id === assignment.personId)?.name || '')
+    .filter(Boolean);
+
+  const uniqueNames = [...new Set(names)].sort((a, b) => a.localeCompare(b));
+  return uniqueNames.join(', ');
+};
+
+const openRoadmapRoleEditor = (projectId, roleCode) => {
+  if (!projectId || !roleCode) {
+    return;
+  }
+
+  state.creatingProjectRow = false;
+  state.editingProjectId = null;
+  if (state.roadmapRoleEditor) {
+    announceEditingStop(buildEditKey('roadmap-role', `${state.roadmapRoleEditor.projectId}:${state.roadmapRoleEditor.roleCode}`)).catch(() => null);
+  }
+  state.roadmapRoleEditor = { projectId, roleCode };
+  announceEditingStart(buildEditKey('roadmap-role', `${projectId}:${roleCode}`)).catch(() => null);
+  renderProjects();
+  renderRoadmapProjects();
+};
+
+const closeRoadmapRoleEditor = () => {
+  if (state.roadmapRoleEditor) {
+    announceEditingStop(buildEditKey('roadmap-role', `${state.roadmapRoleEditor.projectId}:${state.roadmapRoleEditor.roleCode}`)).catch(() => null);
+  }
+  state.roadmapRoleEditor = null;
+  renderRoadmapProjects();
+};
+
+const defaultRoadmapPersonIdForRole = (roleCode) => {
+  const preferred = state.people.find((person) => person.primaryRoleCode === roleCode)?.id;
+  return preferred || state.people[0]?.id || '';
+};
+
+const renderRoadmapRoleAssignmentPanel = (projectId, roleCode) => {
+  const roleLabel = state.roles.find((role) => role.code === roleCode)?.label || roleCode;
+  const existing = state.assignments
+    .filter((assignment) => assignment.projectId === projectId && assignment.roleCode === roleCode)
+    .sort((a, b) => a.startDate.localeCompare(b.startDate));
+  const defaults = getProjectAssignmentDefaultRange(projectId);
+  const defaultPersonId = defaultRoadmapPersonIdForRole(roleCode);
+  const personOptions = state.people
+    .map((person) => `<option value="${escapeHtml(person.id)}" ${person.id === defaultPersonId ? 'selected' : ''}>${escapeHtml(person.name)}</option>`)
+    .join('');
+
+  const existingForms = existing
+    .map((assignment) => {
+      const rowPersonOptions = state.people
+        .map((person) => `<option value="${escapeHtml(person.id)}" ${person.id === assignment.personId ? 'selected' : ''}>${escapeHtml(person.name)}</option>`)
+        .join('');
+      return `
+        <form class="roadmap-assignment-form roadmap-assignment-existing" data-project-id="${projectId}" data-role-code="${roleCode}" data-assignment-id="${assignment.id}">
+          <input name="expectedUpdatedAt" type="hidden" value="${escapeHtml(assignment.updatedAt || '')}" />
+          <label>
+            Person
+            <select name="personId">${rowPersonOptions}</select>
+          </label>
+          <label>
+            Allocation %
+            <input name="allocationPercent" type="number" min="0.1" max="100" step="0.1" value="${assignment.allocationPercent}" required />
+          </label>
+          <label>
+            Start
+            <input name="startDate" type="date" value="${assignment.startDate}" required />
+          </label>
+          <label>
+            End
+            <input name="endDate" type="date" value="${assignment.endDate}" required />
+          </label>
+          <div class="actions">
+            <button type="submit" class="primary">Save</button>
+            <button type="button" class="warn" data-action="delete-roadmap-assignment" data-assignment-id="${assignment.id}">Remove</button>
+          </div>
+        </form>
+      `;
+    })
+    .join('');
+
+  const createForm = `
+    <section class="roadmap-add-assignment-section" aria-label="Add assignment section">
+      <h4>Add Assignment</h4>
+      <form class="roadmap-assignment-form roadmap-assignment-create" data-project-id="${projectId}" data-role-code="${roleCode}" data-assignment-id="">
+        <label>
+          Add Person
+          <select name="personId">${personOptions}</select>
+        </label>
+        <label>
+          Allocation %
+          <input name="allocationPercent" type="number" min="0.1" max="100" step="0.1" value="50" required />
+        </label>
+        <label>
+          Start
+          <input name="startDate" type="date" value="${defaults.startDate}" required />
+        </label>
+        <label>
+          End
+          <input name="endDate" type="date" value="${defaults.endDate}" required />
+        </label>
+        <div class="actions">
+          <button type="submit" class="primary">Add</button>
+          <button type="button" data-action="close-roadmap-role-editor">Done</button>
+        </div>
+      </form>
+    </section>
+  `;
+
+  return `
+    <div class="roadmap-role-editor-panel">
+      <div class="roadmap-role-editor-head">
+        <strong>${escapeHtml(roleLabel)}</strong>
+        <button type="button" data-action="close-roadmap-role-editor">Close</button>
+      </div>
+      ${existingForms || '<p class="meta">No personnel assigned for this role yet.</p>'}
+      ${createForm}
+    </div>
+  `;
+};
+
 const renderRoadmapProjects = () => {
   if (!el.roadmapProjectsList) {
     return;
   }
 
+  const baseRoadmapColumns = [
+    { key: 'product', label: 'Product', headClass: 'roadmap-head-product', defaultWidth: 220, minWidth: 10 },
+    { key: 'studio', label: 'Studio', headClass: 'roadmap-head-studio', defaultWidth: 130, minWidth: 10 },
+    { key: 'startDate', label: 'Start Date', headClass: 'roadmap-head-date', defaultWidth: 102, minWidth: 10 },
+    { key: 'certDate', label: 'Cert Date', headClass: 'roadmap-head-date', defaultWidth: 102, minWidth: 10 },
+    { key: 'exclDate', label: 'Excl Date', headClass: 'roadmap-head-date', defaultWidth: 102, minWidth: 10 },
+    { key: 'liveDate', label: 'Live Date', headClass: 'roadmap-head-date', defaultWidth: 102, minWidth: 10 },
+    { key: 'comments', label: 'Comments', headClass: 'roadmap-head-comments', defaultWidth: 240, minWidth: 10 }
+  ];
+
   if (!state.projects.length) {
-    el.roadmapProjectsList.innerHTML = `${listHeaderHtml(['Product', 'Studio', 'Start Date', 'Cert Date', 'Freeze', 'Excl Date', 'Live Date', 'Comments', 'Actions'])}<p>No projects available.</p>`;
+    const roadmapHeader = buildResizableListHeader('roadmap', baseRoadmapColumns, state.roadmapColumnWidths, 'roadmap-list-header');
+    el.roadmapProjectsList.innerHTML = `${roadmapHeader.html}<p>No projects available.</p>`;
+    applyLiveEditHighlights();
     return;
   }
 
@@ -886,37 +1587,84 @@ const renderRoadmapProjects = () => {
       return left.localeCompare(right);
     });
 
+  const roleColumns = roadmapRoleColumns(ordered);
+  const roadmapColumns = [
+    baseRoadmapColumns[0],
+    baseRoadmapColumns[1],
+    ...roleColumns.map((role) => ({
+      key: `role:${role.code}`,
+      label: role.label,
+      headClass: 'roadmap-head-role',
+      defaultWidth: 140,
+      minWidth: 10
+    })),
+    baseRoadmapColumns[2],
+    baseRoadmapColumns[3],
+    baseRoadmapColumns[4],
+    baseRoadmapColumns[5],
+    baseRoadmapColumns[6]
+  ];
+  const roadmapHeader = buildResizableListHeader('roadmap', roadmapColumns, state.roadmapColumnWidths, 'roadmap-list-header');
+
   el.roadmapProjectsList.innerHTML =
-    listHeaderHtml(['Product', 'Studio', 'Start Date', 'Cert Date', 'Freeze', 'Excl Date', 'Live Date', 'Comments', 'Actions']) +
+    roadmapHeader.html +
     ordered
       .map((project) => {
         if (state.editingProjectId === project.id) {
           return `
-            <div class="list-row list-row-roadmap editing">
-              ${projectInlineEditorHtml(project)}
+            <div class="list-row list-row-roadmap editing" data-edit-key="${buildEditKey('project', project.id)}">
+              ${projectRoadmapInlineEditorHtml(project)}
             </div>
           `;
         }
 
         const milestones = projectMilestones(project);
-        const freezeDate = milestones.certificationDate;
-        return `
-          <div class="list-row list-row-roadmap">
-            <span class="list-cell list-cell-strong">${escapeHtml(project.name)}</span>
-            <span class="list-cell">${escapeHtml(projectStudioLabel(project) || '-')}</span>
-            <span class="list-cell meta">${formatLocalDate(milestones.preProductionStartDate)}</span>
-            <span class="list-cell meta">${formatLocalDate(milestones.certificationDate)}</span>
-            <span class="list-cell meta">${formatLocalDate(freezeDate)}</span>
-            <span class="list-cell meta">${formatLocalDate(milestones.exclusiveDate)}</span>
-            <span class="list-cell meta">${formatLocalDate(milestones.releaseDate)}</span>
-            <span class="list-cell">${escapeHtml(projectComments(project) || '-')}</span>
-            <div class="actions">
-              ${canEditData() ? `<button data-action="edit-project" data-id="${project.id}">Edit</button>` : ''}
+        const roleCells = roleColumns
+          .map((role) => `<button type="button" class="list-cell roadmap-role-cell roadmap-role-trigger" data-action="open-roadmap-role-editor" data-id="${project.id}" data-role-code="${role.code}" title="Edit personnel in ${escapeHtml(role.label)}">${escapeHtml(roadmapRoleNamesForProject(project.id, role.code) || '-')}</button>`)
+          .join('');
+        const roleEditorPanel = state.roadmapRoleEditor && state.roadmapRoleEditor.projectId === project.id
+          ? `
+            <div class="list-row list-row-roadmap roadmap-role-editor-row" data-edit-key="${buildEditKey('roadmap-role', `${project.id}:${state.roadmapRoleEditor.roleCode}`)}" style="grid-template-columns: ${roadmapHeader.template};">
+              <div class="roadmap-role-editor-cell" style="grid-column: 1 / -1;">
+                ${renderRoadmapRoleAssignmentPanel(project.id, state.roadmapRoleEditor.roleCode)}
+              </div>
             </div>
+          `
+          : '';
+
+        return `
+          <div class="list-row list-row-roadmap" data-edit-key="${buildEditKey('project', project.id)}" style="grid-template-columns: ${roadmapHeader.template};">
+            <span class="list-cell list-cell-strong roadmap-cell-product">${escapeHtml(project.name)}</span>
+            <span class="list-cell roadmap-cell-studio">${escapeHtml(projectStudioLabel(project) || '-')}</span>
+            ${roleCells}
+            <button type="button" class="list-cell meta roadmap-cell-date roadmap-date-trigger" data-action="edit-roadmap-date" data-id="${project.id}" data-focus-field="preProductionLengthWeeks" title="Edit Pre-Production weeks">${formatLocalDate(milestones.preProductionStartDate)}</button>
+            <button type="button" class="list-cell meta roadmap-cell-date roadmap-date-trigger" data-action="edit-roadmap-date" data-id="${project.id}" data-focus-field="certificationLeadWeeks" title="Edit Certification lead weeks">${formatLocalDate(milestones.certificationDate)}</button>
+            <button type="button" class="list-cell meta roadmap-cell-date roadmap-date-trigger" data-action="edit-roadmap-date" data-id="${project.id}" data-focus-field="exclusiveLeadWeeks" title="Edit Exclusive lead weeks">${formatLocalDate(milestones.exclusiveDate)}</button>
+            <button type="button" class="list-cell meta roadmap-cell-date roadmap-date-trigger" data-action="edit-roadmap-date" data-id="${project.id}" data-focus-field="releaseDate" title="Edit Release date">${formatLocalDate(milestones.releaseDate)}</button>
+            <span class="list-cell roadmap-cell-comments">${escapeHtml(projectComments(project) || '-')}</span>
           </div>
+          ${roleEditorPanel}
         `;
       })
       .join('');
+  applyLiveEditHighlights();
+};
+
+const openRoadmapProjectEditorAtField = (projectId, fieldName) => {
+  state.roadmapRoleEditor = null;
+  openProjectEditor(projectId);
+  const editForm = el.roadmapProjectsList?.querySelector(`form.project-inline-form[data-project-id="${projectId}"]`);
+  if (!(editForm instanceof HTMLFormElement)) {
+    return;
+  }
+
+  const field = editForm.querySelector(`[name="${fieldName}"]`);
+  if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement) {
+    field.focus();
+    if (field instanceof HTMLInputElement && (field.type === 'text' || field.type === 'date')) {
+      field.select?.();
+    }
+  }
 };
 
 const normalizeViewName = (value) => {
@@ -949,6 +1697,7 @@ const setSettingsPanelOpen = (open) => {
 };
 
 const normalizeHeatmapDensity = (value) => (value === 'large' || value === 'medium' || value === 'compact' ? value : 'medium');
+const normalizePersonnelDensity = (value) => (value === 'large' || value === 'medium' || value === 'compact' ? value : 'medium');
 const normalizeProjectOverviewFilter = (value) => (value === 'all' || value === 'active' ? value : 'active');
 
 const syncHeatmapDensityButtons = () => {
@@ -962,14 +1711,27 @@ const syncHeatmapDensityButtons = () => {
   });
 };
 
-const syncProjectOverviewFilterButtons = () => {
-  const filterButtons = el.projectOverviewStatusFilter?.querySelectorAll('button[data-project-filter]') || [];
-  filterButtons.forEach((button) => {
+const syncPersonnelDensityButtons = () => {
+  const presetButtons = el.personnelHeatmapDensityPresets?.querySelectorAll('button[data-personnel-density]') || [];
+  presetButtons.forEach((button) => {
     if (!(button instanceof HTMLButtonElement)) {
       return;
     }
 
-    button.classList.toggle('primary', button.dataset.projectFilter === state.projectOverviewFilter);
+    button.classList.toggle('primary', button.dataset.personnelDensity === state.personnelHeatmapDensity);
+  });
+};
+
+const syncProjectOverviewFilterButtons = () => {
+  [el.projectOverviewStatusFilter, el.personnelOverviewStatusFilter].forEach((filterRoot) => {
+    const filterButtons = filterRoot?.querySelectorAll('button[data-project-filter]') || [];
+    filterButtons.forEach((button) => {
+      if (!(button instanceof HTMLButtonElement)) {
+        return;
+      }
+
+      button.classList.toggle('primary', button.dataset.projectFilter === state.projectOverviewFilter);
+    });
   });
 };
 
@@ -1037,6 +1799,13 @@ const setHeatmapDensity = (density) => {
   renderProjectUtilizationTimeline();
 };
 
+const setPersonnelDensity = (density) => {
+  state.personnelHeatmapDensity = normalizePersonnelDensity(density);
+  localStorage.setItem(PERSONNEL_DENSITY_KEY, state.personnelHeatmapDensity);
+  syncPersonnelDensityButtons();
+  renderUtilizationTimeline();
+};
+
 const setProjectOverviewFilter = async (filter) => {
   state.projectOverviewFilter = normalizeProjectOverviewFilter(filter);
   syncProjectOverviewFilterButtons();
@@ -1058,20 +1827,43 @@ const openProjectEditor = (projectId) => {
     return;
   }
 
+  if (state.editingProjectId && state.editingProjectId !== projectId) {
+    announceEditingStop(buildEditKey('project', state.editingProjectId)).catch(() => null);
+  }
+  if (state.roadmapRoleEditor) {
+    announceEditingStop(buildEditKey('roadmap-role', `${state.roadmapRoleEditor.projectId}:${state.roadmapRoleEditor.roleCode}`)).catch(() => null);
+  }
   state.creatingProjectRow = false;
   state.editingProjectId = projectId;
+  state.roadmapRoleEditor = null;
+  announceEditingStart(buildEditKey('project', projectId)).catch(() => null);
   renderProjects();
   renderRoadmapProjects();
 };
 
 const closeProjectEditor = () => {
+  const previous = state.editingProjectId;
+  if (state.roadmapRoleEditor) {
+    announceEditingStop(buildEditKey('roadmap-role', `${state.roadmapRoleEditor.projectId}:${state.roadmapRoleEditor.roleCode}`)).catch(() => null);
+  }
   state.editingProjectId = null;
+  state.roadmapRoleEditor = null;
+  if (previous) {
+    announceEditingStop(buildEditKey('project', previous)).catch(() => null);
+  }
   renderProjects();
   renderRoadmapProjects();
 };
 
 const openProjectCreator = () => {
+  if (state.editingProjectId) {
+    announceEditingStop(buildEditKey('project', state.editingProjectId)).catch(() => null);
+  }
+  if (state.roadmapRoleEditor) {
+    announceEditingStop(buildEditKey('roadmap-role', `${state.roadmapRoleEditor.projectId}:${state.roadmapRoleEditor.roleCode}`)).catch(() => null);
+  }
   state.editingProjectId = null;
+  state.roadmapRoleEditor = null;
   state.creatingProjectRow = true;
   renderProjects();
   renderRoadmapProjects();
@@ -1090,8 +1882,9 @@ const personOfficeOptions = (selectedCode) =>
   state.offices.map((o) => `<option value="${escapeHtml(o.code)}" ${o.code === selectedCode ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
 
 const personEditFormHtml = (person) => `
-  <form class="person-edit-form" data-id="${person.id}">
+  <form class="person-edit-form" data-id="${person.id}" data-edit-key="${buildEditKey('person', person.id)}">
     <input name="personId" type="hidden" value="${person.id}" />
+    <input name="expectedUpdatedAt" type="hidden" value="${escapeHtml(person.updatedAt || '')}" />
     <div class="person-edit-fields">
       <label class="person-edit-field">
         <span>Name</span>
@@ -1268,6 +2061,7 @@ const renderUsers = () => {
 
   if (!state.users.length) {
     el.usersList.innerHTML = `${listHeaderHtml(['Email', 'Nickname', 'Access', 'Requested', 'Actions'])}<p>No users found.</p>`;
+    applyLiveEditHighlights();
     return;
   }
 
@@ -1277,7 +2071,7 @@ const renderUsers = () => {
       .map((user) => {
         const requested = user.destroyerAccessRequested ? 'Yes' : 'No';
         return `
-          <div class="list-row list-row-users" data-email="${escapeHtml(user.email)}">
+          <div class="list-row list-row-users" data-edit-key="${buildEditKey('user', user.email.toLowerCase())}" data-email="${escapeHtml(user.email)}" data-updated-at="${escapeHtml(user.updatedAt || '')}">
             <span class="list-cell list-cell-strong">${escapeHtml(user.email)}</span>
             <span class="list-cell">
               <input data-field="nickname" type="text" value="${escapeHtml(user.nickname)}" ${hasUserManagementAccess() ? '' : 'disabled'} />
@@ -1298,6 +2092,7 @@ const renderUsers = () => {
         `;
       })
       .join('');
+  applyLiveEditHighlights();
 };
 
 const renderMappingTableOptions = () => {
@@ -1380,7 +2175,7 @@ const setActiveView = (viewName, options = {}) => {
   }
 
   if (usersVisible) {
-    loadUsers().catch((error) => {
+    Promise.all([loadUsers(), loadAuditLog()]).catch((error) => {
       log('Load users failed', error);
     });
   }
@@ -1443,17 +2238,20 @@ const renderUtilizationTimeline = () => {
     el.utilizationTimeline.innerHTML = '';
     el.projectTimelineSummary.textContent = '';
     el.projectUtilizationTimeline.innerHTML = '';
+    applyLiveEditHighlights();
     return;
   }
 
   const headers = timeline.rows[0]?.weeks ?? [];
   if (!headers.length) {
     el.utilizationTimeline.innerHTML = '<p>No timeline data available.</p>';
+    applyLiveEditHighlights();
     return;
   }
 
+  const todayWeekStart = toMondayIso(new Date().toISOString().slice(0, 10));
   const headerHtml = headers
-    .map((week) => `<div class="timeline-head-cell">${week.weekStart.slice(5)}</div>`)
+    .map((week) => `<div class="timeline-head-cell${week.weekStart === todayWeekStart ? ' current-week' : ''}">${week.weekStart.slice(5)}</div>`)
     .join('');
 
   const closureWeeks = headers.filter((week) => week.closureDays > 0).length;
@@ -1464,6 +2262,7 @@ const renderUtilizationTimeline = () => {
       : 'no global closures in visible range';
 
   const pinnedLeadColumnWidth = 140;
+  const utilizationCellWidth = HEATMAP_DENSITY_WIDTH[state.personnelHeatmapDensity] || HEATMAP_DENSITY_WIDTH.medium;
 
   const rowsHtml = timeline.rows
     .map((row) => {
@@ -1481,19 +2280,20 @@ const renderUtilizationTimeline = () => {
         .map((week) => {
           const tone = utilizationTone(week.utilizationPercent);
           const closureBadge = week.closureDays > 0 ? ` | closure ${week.closureDays}d` : '';
-          return `<button class="timeline-cell ${tone}" data-timeline="person" data-person-id="${row.personId}" data-label="${escapeHtml(row.personName)}" data-week-start="${week.weekStart}" title="${row.personName}: ${week.utilizationPercent}% on ${week.weekStart}${closureBadge}">${week.utilizationPercent}%</button>`;
+          const currentWeekClass = week.weekStart === todayWeekStart ? ' current-week' : '';
+          return `<button class="timeline-cell ${tone}${currentWeekClass}" data-timeline="person" data-person-id="${row.personId}" data-label="${escapeHtml(row.personName)}" data-week-start="${week.weekStart}" title="${row.personName}: ${week.utilizationPercent}% on ${week.weekStart}${closureBadge}">${week.utilizationPercent}%</button>`;
         })
         .join('');
       const roleCode = person?.primaryRoleCode || '';
 
       return `
-        <div class="utilization-data-row">
+        <div class="utilization-data-row" data-edit-key="${buildEditKey('person', row.personId)}">
           <div class="timeline-row-label person-label utilization-fixed-cell">
             <button class="row-toggle${expanded ? ' active' : ''}" data-action="expand-person" data-id="${row.personId}" title="${expanded ? 'Collapse' : 'Edit person'}">✎</button>
             <span class="person-label-text">${escapeHtml(row.personName)}${roleCode ? ` ${escapeHtml(`(${roleCode})`)}` : ''}</span>
           </div>
           <div class="utilization-scroll-slave">
-            <div class="utilization-week-strip" data-role="utilization-timeline-slave-strip" style="grid-template-columns: repeat(${headers.length}, minmax(44px, 1fr));">
+            <div class="utilization-week-strip" data-role="utilization-timeline-slave-strip" style="grid-template-columns: repeat(${headers.length}, ${utilizationCellWidth}px);">
               ${cells}
             </div>
           </div>
@@ -1507,7 +2307,7 @@ const renderUtilizationTimeline = () => {
       <div class="utilization-header-row">
         <div class="timeline-corner utilization-fixed-corner">Person / Week</div>
         <div class="utilization-scroll-master" data-role="utilization-timeline-master">
-          <div class="utilization-week-strip" style="grid-template-columns: repeat(${headers.length}, minmax(44px, 1fr));">
+          <div class="utilization-week-strip" style="grid-template-columns: repeat(${headers.length}, ${utilizationCellWidth}px);">
             ${headerHtml}
           </div>
         </div>
@@ -1555,6 +2355,7 @@ const renderUtilizationTimeline = () => {
   }
 
   syncUtilizationTimelineScroll();
+  applyLiveEditHighlights();
 };
 
 const projectWeekPeakAllocation = (projectId, weekStart) => {
@@ -1595,8 +2396,10 @@ const toggleProjectRowExpanded = (projectId) => {
 const togglePersonExpanded = (personId) => {
   if (state.expandedPersonIds.includes(personId)) {
     state.expandedPersonIds = state.expandedPersonIds.filter((id) => id !== personId);
+    announceEditingStop(buildEditKey('person', personId)).catch(() => null);
   } else {
     state.expandedPersonIds = [...state.expandedPersonIds, personId];
+    announceEditingStart(buildEditKey('person', personId)).catch(() => null);
   }
   renderUtilizationTimeline();
 };
@@ -1651,6 +2454,7 @@ const syncProjectAssignmentEditorFromForm = (projectId, assignmentId = null) => 
   state.projectAssignmentEditor.allocationPercent = Number(formData.get('allocationPercent') || state.projectAssignmentEditor.allocationPercent);
   state.projectAssignmentEditor.startDate = String(formData.get('startDate') || state.projectAssignmentEditor.startDate);
   state.projectAssignmentEditor.endDate = String(formData.get('endDate') || state.projectAssignmentEditor.endDate);
+  state.projectAssignmentEditor.expectedUpdatedAt = String(formData.get('expectedUpdatedAt') || state.projectAssignmentEditor.expectedUpdatedAt || '');
 };
 
 const applyWeekToSelectedAssignmentDate = (projectId, weekStart, weekEnd) => {
@@ -1688,6 +2492,7 @@ const openProjectAssignmentEditor = (projectId, assignmentId = null, seedRange =
   state.projectAssignmentEditor = {
     projectId,
     assignmentId,
+    expectedUpdatedAt: existing?.updatedAt || '',
     personId: defaultPersonId,
     roleCode: defaultRoleCode,
     allocationPercent: existing?.allocationPercent || 50,
@@ -1701,10 +2506,17 @@ const openProjectAssignmentEditor = (projectId, assignmentId = null, seedRange =
     fieldName: 'startDate'
   };
 
+  if (assignmentId) {
+    announceEditingStart(buildEditKey('assignment', assignmentId)).catch(() => null);
+  }
+
   renderProjectUtilizationTimeline({ preservePosition: true });
 };
 
 const closeProjectAssignmentEditor = () => {
+  if (state.projectAssignmentEditor?.assignmentId) {
+    announceEditingStop(buildEditKey('assignment', state.projectAssignmentEditor.assignmentId)).catch(() => null);
+  }
   state.projectAssignmentEditor = null;
   state.projectAssignmentDateSelection = null;
   renderProjectUtilizationTimeline({ preservePosition: true });
@@ -1741,6 +2553,7 @@ const renderProjectAssignmentEditor = (projectId, assignmentId = null) => {
 
   return `
     <form class="project-assignment-form grid three" data-project-id="${projectId}" data-assignment-id="${editor.assignmentId || ''}" data-editor-mode="${isCreateEditor ? 'create' : 'edit'}">
+      <input name="expectedUpdatedAt" type="hidden" value="${escapeHtml(editor.expectedUpdatedAt || '')}" />
       <label>
         Person
         <select name="personId" onchange="onAssignmentPersonChange(this)">${personOptions}</select>
@@ -1802,7 +2615,7 @@ const renderProjectPersonnelDetails = (projectId, weeks, projectCellWidth) => {
         return `<div class="project-person-row project-person-editor-row">${inlineEditor}</div>`;
       }
 
-      return `<div class="project-person-row"><div class="project-person-head"><strong>${escapeHtml(person?.name ?? 'Unknown Person')}</strong><span class="meta">${escapeHtml(state.roles.find((r) => r.code === assignment.roleCode)?.label ?? assignment.roleCode)} | ${formatLocalDate(assignment.startDate)} -> ${formatLocalDate(assignment.endDate)}</span><div class="actions">${canEditData() ? `<button data-action="edit-project-assignment" data-assignment-id="${assignment.id}" data-project-id="${projectId}">Edit</button><button data-action="delete-project-assignment" data-assignment-id="${assignment.id}" class="warn">Remove</button>` : ''}</div></div><div class="project-person-timeline-wrap"><div class="project-person-timeline" data-role="project-timeline-slave-strip" style="grid-template-columns: repeat(${weeks.length}, ${projectCellWidth}px);">${weekCells}</div></div></div>`;
+      return `<div class="project-person-row" data-edit-key="${buildEditKey('assignment', assignment.id)}"><div class="project-person-head"><strong>${escapeHtml(person?.name ?? 'Unknown Person')}</strong><span class="meta">${escapeHtml(state.roles.find((r) => r.code === assignment.roleCode)?.label ?? assignment.roleCode)} | ${formatLocalDate(assignment.startDate)} -> ${formatLocalDate(assignment.endDate)}</span><div class="actions">${canEditData() ? `<button data-action="edit-project-assignment" data-assignment-id="${assignment.id}" data-project-id="${projectId}">Edit</button><button data-action="delete-project-assignment" data-assignment-id="${assignment.id}" class="warn">Remove</button>` : ''}</div></div><div class="project-person-timeline-wrap"><div class="project-person-timeline" data-role="project-timeline-slave-strip" style="grid-template-columns: repeat(${weeks.length}, ${projectCellWidth}px);">${weekCells}</div></div></div>`;
     })
     .join('')
     : '<p class="meta">No personnel assignments attached to this project.</p>';
@@ -1820,6 +2633,7 @@ const renderProjectUtilizationTimeline = (options = {}) => {
   if (!timeline) {
     el.projectTimelineSummary.textContent = '';
     el.projectUtilizationTimeline.innerHTML = '';
+    applyLiveEditHighlights();
     return;
   }
 
@@ -1836,6 +2650,7 @@ const renderProjectUtilizationTimeline = (options = {}) => {
   const headers = firstRowWeeks;
   if (!headers.length) {
     el.projectUtilizationTimeline.innerHTML = `<p>No ${state.projectOverviewFilter === 'all' ? '' : 'active '}projects available for timeline view.</p>`;
+    applyLiveEditHighlights();
     return;
   }
 
@@ -2062,10 +2877,12 @@ const renderProjectUtilizationTimeline = (options = {}) => {
     masterScroll.scrollLeft = previousScrollLeft;
     el.projectUtilizationTimeline.scrollTop = previousScrollTop;
     syncProjectTimelineScroll();
+    applyLiveEditHighlights();
     return;
   }
 
   syncProjectTimelineScroll();
+  applyLiveEditHighlights();
 
   const todayIso = new Date().toISOString().slice(0, 10);
   const currentWeekIndex = headers.findIndex((week) => {
@@ -2100,11 +2917,13 @@ const loadProjects = async () => {
 const loadPeople = async () => {
   state.people = await fetchJson('/api/v1/people');
   renderPeople();
+  renderRoadmapProjects();
 };
 
 const loadRoles = async () => {
   state.roles = await fetchJson('/api/v1/roles');
   renderRoles();
+  renderRoadmapProjects();
 };
 
 const loadOffices = async () => {
@@ -2114,6 +2933,7 @@ const loadOffices = async () => {
 
 const loadAssignments = async () => {
   state.assignments = await fetchJson('/api/v1/assignments');
+  renderRoadmapProjects();
 };
 
 const loadMappingTables = async () => {
@@ -2128,6 +2948,8 @@ const loadMappings = async () => {
 
 const loadCurrentUser = async () => {
   state.currentUser = await fetchJson('/api/v1/users/me');
+  state.csrfToken = null;
+  await ensureCsrfToken();
   renderAuthStatus();
   syncRoleEchoFields();
   syncAccessRequestButton();
@@ -2140,12 +2962,25 @@ const loadCurrentUser = async () => {
 const loadUsers = async () => {
   if (!hasUserManagementAccess()) {
     state.users = [];
+    state.auditEvents = [];
     renderUsers();
+    renderAuditLog();
     return;
   }
 
   state.users = await fetchJson('/api/v1/admin/users');
   renderUsers();
+};
+
+const loadAuditLog = async () => {
+  if (!hasUserManagementAccess()) {
+    state.auditEvents = [];
+    renderAuditLog();
+    return;
+  }
+
+  state.auditEvents = await fetchJson('/api/v1/admin/audit-log?limit=200');
+  renderAuditLog();
 };
 
 const loadUtilization = async (weekStart) => {
@@ -2192,11 +3027,6 @@ const loadClosures = async () => {
 };
 
 const refreshAll = async () => {
-  if (!state.googleIdToken) {
-    redirectToLogin('required');
-    return;
-  }
-
   try {
     await loadCurrentUser();
 
@@ -2212,13 +3042,16 @@ const refreshAll = async () => {
     ]);
 
     if (hasUserManagementAccess()) {
-      await loadUsers();
+      await Promise.all([loadUsers(), loadAuditLog()]);
     } else {
       state.users = [];
+      state.auditEvents = [];
       renderUsers();
+      renderAuditLog();
     }
 
     await refreshOverviewAnalytics();
+    startLiveEditingLoop();
     log('Loaded data', {
       currentUser: state.currentUser?.email,
       accessLevel: state.currentUser?.accessLevel,
@@ -2407,6 +3240,47 @@ const bindButtons = () => {
     });
   }
 
+  if (el.conflictDialogClose instanceof HTMLButtonElement) {
+    el.conflictDialogClose.addEventListener('click', () => {
+      closeConflictDialog();
+    });
+  }
+
+  if (el.conflictDialog instanceof HTMLElement) {
+    el.conflictDialog.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+
+      if (target.dataset.action === 'close-conflict-dialog') {
+        closeConflictDialog();
+      }
+    });
+  }
+
+  const onListColumnResizePointerDown = (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement) || !target.classList.contains('col-resize-handle')) {
+      return;
+    }
+
+    const listType = target.dataset.listType;
+    const columnKey = target.dataset.colKey;
+    if (!listType || !columnKey) {
+      return;
+    }
+
+    event.preventDefault();
+    const widthMap = listType === 'projects' ? state.projectsColumnWidths : state.roadmapColumnWidths;
+    const measuredWidth = target.closest('.resizable-head-cell')?.getBoundingClientRect().width || 120;
+    const currentWidth = resolveColumnWidth(widthMap, columnKey, measuredWidth);
+    startColumnResize(listType, columnKey, event.clientX, currentWidth);
+  };
+
+  el.overviewProjectsList?.addEventListener('pointerdown', onListColumnResizePointerDown);
+  el.roadmapProjectsList?.addEventListener('pointerdown', onListColumnResizePointerDown);
+
   el.settingsToggle.addEventListener('click', () => {
     const open = el.settingsPanel.classList.contains('hidden-view');
     setSettingsPanelOpen(open);
@@ -2421,7 +3295,6 @@ const bindButtons = () => {
   el.showPlanningView.addEventListener('click', () => setActiveView('planning', { updateHistory: true }));
   el.showMappingsView.addEventListener('click', () => setActiveView('mappings', { updateHistory: true }));
   el.showUserManagementView.addEventListener('click', () => setActiveView('users', { updateHistory: true }));
-  el.showPlanningFromOverview.addEventListener('click', () => setActiveView('planning', { updateHistory: true }));
   el.refreshAll.addEventListener('click', refreshAll);
   if (el.themeToggle) {
     el.themeToggle.addEventListener('click', () => {
@@ -2430,13 +3303,12 @@ const bindButtons = () => {
     });
   }
   el.googleSignOut.addEventListener('click', async () => {
-    sessionStorage.removeItem(AUTH_TOKEN_KEY);
-    sessionStorage.removeItem(AUTH_EMAIL_KEY);
-    state.googleIdToken = null;
-    state.googleEmail = null;
-    if (window.google?.accounts?.id) {
-      window.google.accounts.id.disableAutoSelect();
+    try {
+      await fetchJson('/api/v1/auth/logout', { method: 'POST' });
+    } catch {
+      // Ignore logout errors; redirecting to login is still safe.
     }
+    state.csrfToken = null;
     redirectToLogin('signedout');
   });
 
@@ -2463,10 +3335,19 @@ const bindButtons = () => {
 
   el.loadUsers?.addEventListener('click', async () => {
     try {
-      await loadUsers();
-      log('Users reloaded', { count: state.users.length });
+      await Promise.all([loadUsers(), loadAuditLog()]);
+      log('Users reloaded', { count: state.users.length, auditEvents: state.auditEvents.length });
     } catch (error) {
       log('Reload users failed', error);
+    }
+  });
+
+  el.loadAuditLog?.addEventListener('click', async () => {
+    try {
+      await loadAuditLog();
+      log('Audit log reloaded', { count: state.auditEvents.length });
+    } catch (error) {
+      log('Reload audit log failed', error);
     }
   });
   el.loadProjectsOverview.addEventListener('click', async () => {
@@ -2595,7 +3476,35 @@ const bindButtons = () => {
     }
   });
 
+  el.personnelHeatmapDensityPresets?.addEventListener('click', async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement) || !target.dataset.personnelDensity) {
+      return;
+    }
+
+    try {
+      setPersonnelDensity(target.dataset.personnelDensity);
+      log('Personnel timeline size updated', { density: state.personnelHeatmapDensity });
+    } catch (error) {
+      log('Update personnel timeline size failed', error);
+    }
+  });
+
   el.projectOverviewStatusFilter?.addEventListener('click', async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement) || !target.dataset.projectFilter) {
+      return;
+    }
+
+    try {
+      await setProjectOverviewFilter(target.dataset.projectFilter);
+      log('Project overview filter updated', { filter: state.projectOverviewFilter });
+    } catch (error) {
+      log('Update project overview filter failed', error);
+    }
+  });
+
+  el.personnelOverviewStatusFilter?.addEventListener('click', async (event) => {
     const target = event.target;
     if (!(target instanceof HTMLButtonElement) || !target.dataset.projectFilter) {
       return;
@@ -2663,11 +3572,12 @@ const bindButtons = () => {
     if (!ensureEditable()) {
       return;
     }
+
     const formData = new FormData(form);
     const isNew = form.dataset.new === 'true';
     const payload = {
       name: String(formData.get('name') || '').trim(),
-      comments: String(formData.get('comments') || ''),
+      description: String(formData.get('description') || ''),
       settings: {
         defaultCapacityHoursPerDay: 8,
         notificationProfile: String(formData.get('notificationProfile') || 'standard'),
@@ -2697,7 +3607,10 @@ const bindButtons = () => {
         const templateId = String(form.dataset.templateId || '');
         const data = await fetchJson(`/api/v1/project-templates/${templateId}`, {
           method: 'PATCH',
-          body: JSON.stringify(payload)
+          body: JSON.stringify({
+            ...payload,
+            expectedUpdatedAt: String(formData.get('expectedUpdatedAt') || '') || undefined
+          })
         });
         log('Template updated', data);
       }
@@ -2768,6 +3681,11 @@ const bindButtons = () => {
       if (!row) {
         return;
       }
+      const code = String(row.dataset.code || '');
+      const keyPrefix = kind === 'role' ? 'role-def' : 'office-def';
+      if (code) {
+        announceEditingStop(buildEditKey(keyPrefix, code)).catch(() => null);
+      }
       row.querySelector('.person-row-view')?.classList.remove('hidden');
       row.querySelector('.person-row-form')?.classList.add('hidden');
       return;
@@ -2780,6 +3698,11 @@ const bindButtons = () => {
       const row = target.closest('.person-row');
       if (!row) {
         return;
+      }
+      const code = String(row.dataset.code || '');
+      const keyPrefix = kind === 'role' ? 'role-def' : 'office-def';
+      if (code) {
+        announceEditingStart(buildEditKey(keyPrefix, code)).catch(() => null);
       }
       row.querySelector('.person-row-view')?.classList.add('hidden');
       row.querySelector('.person-row-form')?.classList.remove('hidden');
@@ -2842,6 +3765,8 @@ const bindButtons = () => {
           method: 'PATCH',
           body: JSON.stringify({ label })
         });
+        const keyPrefix = kind === 'role' ? 'role-def' : 'office-def';
+        announceEditingStop(buildEditKey(keyPrefix, currentCode)).catch(() => null);
       }
 
       if (kind === 'role') {
@@ -2874,7 +3799,8 @@ const bindButtons = () => {
       primaryRoleCode: String(data.get('primaryRoleCode') || '').trim(),
       office: String(data.get('office') || '').trim(),
       weeklyCapacityHours: Number(data.get('weeklyCapacityHours')),
-      workingDays: getWorkingDays(String(data.get('workingDays') || ''))
+      workingDays: getWorkingDays(String(data.get('workingDays') || '')),
+      expectedUpdatedAt: String(data.get('expectedUpdatedAt') || '') || undefined
     };
     try {
       const result = await fetchJson('/api/v1/people', { method: 'POST', body: JSON.stringify(payload) });
@@ -2905,12 +3831,14 @@ const bindButtons = () => {
       primaryRoleCode: String(data.get('primaryRoleCode') || '').trim(),
       office: String(data.get('office') || '').trim(),
       weeklyCapacityHours: Number(data.get('weeklyCapacityHours')),
-      workingDays: getWorkingDays(String(data.get('workingDays') || ''))
+      workingDays: getWorkingDays(String(data.get('workingDays') || '')),
+      expectedUpdatedAt: String(data.get('expectedUpdatedAt') || '') || undefined
     };
     try {
       const result = await fetchJson(`/api/v1/people/${personId}`, { method: 'PATCH', body: JSON.stringify(payload) });
       log('Person updated', result);
       state.expandedPersonIds = state.expandedPersonIds.filter((id) => id !== personId);
+      announceEditingStop(buildEditKey('person', personId)).catch(() => null);
       await Promise.all([loadPeople(), refreshOverviewAnalytics()]);
     } catch (error) {
       log('Update person failed', error);
@@ -2947,25 +3875,112 @@ const bindButtons = () => {
 
   el.roadmapProjectsList?.addEventListener('click', (event) => {
     const target = event.target;
-    if (!(target instanceof HTMLButtonElement)) {
+    if (!(target instanceof HTMLElement)) {
       return;
     }
 
-    if (target.dataset.action === 'edit-project' && target.dataset.id) {
+    const button = target.closest('button');
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    if (button.dataset.action === 'edit-roadmap-date' && button.dataset.id) {
       if (!ensureEditable()) {
         return;
       }
-      openProjectEditor(target.dataset.id);
-      const editForm = el.roadmapProjectsList.querySelector(`form.project-inline-form[data-project-id="${target.dataset.id}"]`);
+
+      openRoadmapProjectEditorAtField(button.dataset.id, button.dataset.focusField || 'releaseDate');
+      return;
+    }
+
+    if (button.dataset.action === 'open-roadmap-role-editor' && button.dataset.id && button.dataset.roleCode) {
+      if (!ensureEditable()) {
+        return;
+      }
+
+      openRoadmapRoleEditor(button.dataset.id, button.dataset.roleCode);
+      return;
+    }
+
+    if (button.dataset.action === 'close-roadmap-role-editor') {
+      closeRoadmapRoleEditor();
+      return;
+    }
+
+    if (button.dataset.action === 'delete-roadmap-assignment' && button.dataset.assignmentId) {
+      if (!ensureEditable()) {
+        return;
+      }
+
+      fetchJson(`/api/v1/assignments/${button.dataset.assignmentId}`, { method: 'DELETE' })
+        .then(() => Promise.all([loadAssignments(), refreshOverviewAnalytics()]))
+        .then(() => {
+          renderRoadmapProjects();
+          log('Roadmap assignment removed', { assignmentId: button.dataset.assignmentId });
+        })
+        .catch((error) => log('Remove roadmap assignment failed', error));
+      return;
+    }
+
+    if (button.dataset.action === 'edit-project' && button.dataset.id) {
+      if (!ensureEditable()) {
+        return;
+      }
+      openProjectEditor(button.dataset.id);
+      const editForm = el.roadmapProjectsList.querySelector(`form.project-inline-form[data-project-id="${button.dataset.id}"]`);
       if (editForm instanceof HTMLFormElement) {
         updateProjectFormMilestonePreviews(editForm);
       }
       return;
     }
 
-    if (target.dataset.action === 'cancel-project-edit') {
+    if (button.dataset.action === 'cancel-project-edit') {
       closeProjectEditor();
       return;
+    }
+  });
+
+  el.roadmapProjectsList?.addEventListener('submit', async (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement) || !form.classList.contains('roadmap-assignment-form')) {
+      return;
+    }
+
+    event.preventDefault();
+    if (!ensureEditable()) {
+      return;
+    }
+
+    const formData = new FormData(form);
+    const assignmentId = String(form.dataset.assignmentId || '');
+    const payload = {
+      personId: String(formData.get('personId') || ''),
+      projectId: String(form.dataset.projectId || ''),
+      roleCode: String(form.dataset.roleCode || ''),
+      allocationPercent: Number(formData.get('allocationPercent')),
+      startDate: String(formData.get('startDate') || ''),
+      endDate: String(formData.get('endDate') || ''),
+      expectedUpdatedAt: String(formData.get('expectedUpdatedAt') || '') || undefined
+    };
+
+    try {
+      if (assignmentId) {
+        await fetchJson(`/api/v1/assignments/${assignmentId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload)
+        });
+      } else {
+        await fetchJson('/api/v1/assignments', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+      }
+
+      await Promise.all([loadAssignments(), refreshOverviewAnalytics()]);
+      renderRoadmapProjects();
+      log(assignmentId ? 'Roadmap assignment updated' : 'Roadmap assignment created', payload);
+    } catch (error) {
+      log(assignmentId ? 'Update roadmap assignment failed' : 'Create roadmap assignment failed', error);
     }
   });
 
@@ -3046,7 +4061,8 @@ const bindButtons = () => {
             productionLengthDays: Math.max(1, weeksToDays(formData.get('productionLengthWeeks'))),
             preProductionLengthDays: weeksToDays(formData.get('preProductionLengthWeeks'))
           },
-          status: String(formData.get('status') || 'active')
+          status: String(formData.get('status') || 'active'),
+          expectedUpdatedAt: String(formData.get('expectedUpdatedAt') || '') || undefined
         };
         data = await fetchJson(`/api/v1/projects/${projectId}`, {
           method: 'PATCH',
@@ -3094,7 +4110,8 @@ const bindButtons = () => {
           productionLengthDays: Math.max(1, weeksToDays(formData.get('productionLengthWeeks'))),
           preProductionLengthDays: weeksToDays(formData.get('preProductionLengthWeeks'))
         },
-        status: String(formData.get('status') || 'active')
+        status: String(formData.get('status') || 'active'),
+        expectedUpdatedAt: String(formData.get('expectedUpdatedAt') || '') || undefined
       };
       const data = await fetchJson(`/api/v1/projects/${projectId}`, {
         method: 'PATCH',
@@ -3158,6 +4175,8 @@ const bindButtons = () => {
     }
 
     if (target.dataset.action === 'knight-destroyer' && target.dataset.email) {
+      const row = target.closest('.list-row-users');
+      const expectedUpdatedAt = row instanceof HTMLElement ? String(row.dataset.updatedAt || '') : '';
       const confirmed = await confirmProposedChange(`Knight Destroyer for ${target.dataset.email}?`);
       if (!confirmed) {
         return;
@@ -3165,9 +4184,11 @@ const bindButtons = () => {
 
       try {
         await fetchJson(`/api/v1/admin/users/${encodeURIComponent(target.dataset.email)}/knight-destroyer`, {
-          method: 'POST'
+          method: 'POST',
+          body: JSON.stringify({ expectedUpdatedAt: expectedUpdatedAt || undefined })
         });
-        await Promise.all([loadUsers(), loadCurrentUser()]);
+        announceEditingStop(buildEditKey('user', String(target.dataset.email || '').toLowerCase())).catch(() => null);
+        await Promise.all([loadUsers(), loadAuditLog(), loadCurrentUser()]);
         log('User upgraded to Destroyer', { email: target.dataset.email });
       } catch (error) {
         log('Knight Destroyer failed', error);
@@ -3189,7 +4210,8 @@ const bindButtons = () => {
 
       const payload = {
         nickname: nicknameInput.value.trim(),
-        accessLevel: accessSelect.value
+        accessLevel: accessSelect.value,
+        expectedUpdatedAt: String(row.dataset.updatedAt || '') || undefined
       };
 
       try {
@@ -3197,12 +4219,56 @@ const bindButtons = () => {
           method: 'PATCH',
           body: JSON.stringify(payload)
         });
-        await Promise.all([loadUsers(), loadCurrentUser()]);
+        announceEditingStop(buildEditKey('user', String(target.dataset.email || '').toLowerCase())).catch(() => null);
+        await Promise.all([loadUsers(), loadAuditLog(), loadCurrentUser()]);
         log('User updated', { email: target.dataset.email, ...payload });
       } catch (error) {
         log('Update user failed', error);
       }
     }
+  });
+
+  el.usersList?.addEventListener('focusin', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const row = target.closest('.list-row-users');
+    if (!(row instanceof HTMLElement)) {
+      return;
+    }
+
+    const email = String(row.dataset.email || '').toLowerCase();
+    if (!email) {
+      return;
+    }
+
+    announceEditingStart(buildEditKey('user', email)).catch(() => null);
+  });
+
+  el.usersList?.addEventListener('focusout', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const row = target.closest('.list-row-users');
+    if (!(row instanceof HTMLElement)) {
+      return;
+    }
+
+    const email = String(row.dataset.email || '').toLowerCase();
+    if (!email) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      if (row.contains(document.activeElement)) {
+        return;
+      }
+      announceEditingStop(buildEditKey('user', email)).catch(() => null);
+    }, 0);
   });
 
   const onTimelineClick = async (event) => {
@@ -3239,6 +4305,7 @@ const bindButtons = () => {
       fetchJson(`/api/v1/people/${personId}`, { method: 'DELETE' })
         .then(() => {
           state.expandedPersonIds = state.expandedPersonIds.filter((id) => id !== personId);
+          announceEditingStop(buildEditKey('person', personId)).catch(() => null);
           return Promise.all([loadPeople(), refreshOverviewAnalytics()]);
         })
         .catch((error) => log('Delete person failed', error));
@@ -3313,7 +4380,8 @@ const bindButtons = () => {
         roleCode: String(formData.get('roleCode') || '').trim(),
         allocationPercent: Number(formData.get('allocationPercent')),
         startDate: String(formData.get('startDate') || ''),
-        endDate: String(formData.get('endDate') || '')
+        endDate: String(formData.get('endDate') || ''),
+        expectedUpdatedAt: String(formData.get('expectedUpdatedAt') || '') || undefined
       };
 
       try {
@@ -3389,6 +4457,19 @@ const bindButtons = () => {
   el.utilizationTimeline.addEventListener('click', onTimelineClick);
   el.projectUtilizationTimeline.addEventListener('click', onTimelineClick);
 
+  window.addEventListener('beforeunload', () => {
+    [...localEditingKeys.values()].forEach((key) => {
+      fetch(`/api/v1/collab/editing/${encodeURIComponent(key)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: {
+          ...(state.csrfToken ? { 'x-csrf-token': state.csrfToken } : {})
+        },
+        keepalive: true
+      });
+    });
+  });
+
   window.addEventListener('popstate', () => {
     setActiveView(getViewFromLocation(), { updateHistory: false });
   });
@@ -3400,6 +4481,7 @@ const bindButtons = () => {
       if (closeConfirmDialog(false)) {
         return;
       }
+      closeConflictDialog();
       setSettingsPanelOpen(false);
     }
   });
@@ -3407,6 +4489,7 @@ const bindButtons = () => {
 
 initializeThemeMode();
 setHeatmapDensity(localStorage.getItem(HEATMAP_DENSITY_KEY));
+setPersonnelDensity(localStorage.getItem(PERSONNEL_DENSITY_KEY));
 syncProjectOverviewFilterButtons();
 syncPlanningVisibility();
 syncMappingTabVisibility();
@@ -3414,15 +4497,12 @@ syncUserManagementTabVisibility();
 syncAccessRequestButton();
 syncEditingVisibility();
 
-if (!state.googleIdToken) {
+bindForms();
+bindButtons();
+setActiveView(getViewFromLocation(), { updateHistory: true, replaceHistory: true });
+resetMappingEditor();
+initializeGoogleAuth().then(refreshAll).catch((error) => {
+  log('Google auth init failed', error);
+  clearDataViews();
   redirectToLogin('required');
-} else {
-  bindForms();
-  bindButtons();
-  setActiveView(getViewFromLocation(), { updateHistory: true, replaceHistory: true });
-  resetMappingEditor();
-  initializeGoogleAuth().then(refreshAll).catch((error) => {
-    log('Google auth init failed', error);
-    clearDataViews();
-  });
-}
+});

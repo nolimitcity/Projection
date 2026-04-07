@@ -145,12 +145,20 @@ body {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  padding: 0.42rem 0.72rem;
-  border-radius: 999px;
+  justify-content: center;
+  height: calc(1em + 1.2rem + 2px);
+  padding: 0 0.72rem;
+  border-radius: 16px;
   border: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 92%, var(--accent) 8%);
   font-weight: 700;
   letter-spacing: 0.02em;
+}
+
+.app-brand-icon {
+  width: 1.7rem;
+  height: 1.7rem;
+  display: block;
 }
 
 .hero p {
@@ -247,6 +255,27 @@ body {
   margin: 0;
   display: grid;
   gap: 0.7rem;
+}
+
+.conflict-dialog-panel {
+  width: min(60rem, calc(100vw - 2rem));
+}
+
+.conflict-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.conflict-columns section h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+}
+
+#conflictAttemptedPayload,
+#conflictLatestPayload {
+  margin: 0;
+  max-height: 14rem;
 }
 
 .confirm-dialog-panel h2 {
@@ -406,6 +435,7 @@ button.warn {
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  align-items: start;
 }
 
 .list-header > span {
@@ -419,6 +449,70 @@ button.warn {
 .list-row > .list-cell {
   justify-self: start;
   text-align: left;
+}
+
+.resizable-head-cell {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-start;
+  min-width: 0;
+  padding-right: 0.65rem;
+}
+
+.resizable-head-label {
+  min-width: 0;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.2;
+}
+
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -0.45rem;
+  width: 0.9rem;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: col-resize;
+  z-index: 2;
+}
+
+.col-resize-handle::before {
+  content: '';
+  display: block;
+  width: 3px;
+  height: 84%;
+  margin: 8% auto;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 84%, var(--text));
+  opacity: 0.8;
+}
+
+.col-resize-icon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.68rem;
+  line-height: 1;
+  color: var(--muted);
+  opacity: 1;
+  pointer-events: none;
+  font-weight: 700;
+}
+
+.resizable-head-cell:hover .col-resize-handle::before,
+.col-resize-handle:focus-visible::before {
+  opacity: 0.9;
+  background: var(--accent);
+}
+
+.resizable-head-cell:hover .col-resize-icon,
+.col-resize-handle:focus-visible .col-resize-icon {
+  color: var(--accent);
 }
 
 .list-header > span:last-child,
@@ -456,29 +550,94 @@ button.warn {
   text-align: left;
 }
 
-#roadmapProjectsList .list-header > span:nth-child(1),
-#roadmapProjectsList .list-header > span:nth-child(2),
-#roadmapProjectsList .list-header > span:nth-child(8),
-#roadmapProjectsList .list-header > span:nth-child(9),
-#roadmapProjectsList .list-row > .list-cell:nth-child(1),
-#roadmapProjectsList .list-row > .list-cell:nth-child(2),
-#roadmapProjectsList .list-row > .list-cell:nth-child(8) {
+#roadmapProjectsList .roadmap-list-header > .roadmap-head-product,
+#roadmapProjectsList .roadmap-list-header > .roadmap-head-studio,
+#roadmapProjectsList .roadmap-list-header > .roadmap-head-role,
+#roadmapProjectsList .roadmap-list-header > .roadmap-head-comments,
+#roadmapProjectsList .list-row-roadmap .roadmap-cell-product,
+#roadmapProjectsList .list-row-roadmap .roadmap-cell-studio,
+#roadmapProjectsList .list-row-roadmap .roadmap-role-cell,
+#roadmapProjectsList .list-row-roadmap .roadmap-cell-comments {
   justify-self: start;
   text-align: left;
 }
 
-#roadmapProjectsList .list-header > span:nth-child(3),
-#roadmapProjectsList .list-header > span:nth-child(4),
-#roadmapProjectsList .list-header > span:nth-child(5),
-#roadmapProjectsList .list-header > span:nth-child(6),
-#roadmapProjectsList .list-header > span:nth-child(7),
-#roadmapProjectsList .list-row > .list-cell:nth-child(3),
-#roadmapProjectsList .list-row > .list-cell:nth-child(4),
-#roadmapProjectsList .list-row > .list-cell:nth-child(5),
-#roadmapProjectsList .list-row > .list-cell:nth-child(6),
-#roadmapProjectsList .list-row > .list-cell:nth-child(7) {
+#roadmapProjectsList .roadmap-list-header > .roadmap-head-date,
+#roadmapProjectsList .list-row-roadmap .roadmap-cell-date {
   justify-self: end;
   text-align: right;
+}
+
+#roadmapProjectsList .roadmap-date-trigger {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+#roadmapProjectsList .roadmap-date-trigger:hover .date-visual,
+#roadmapProjectsList .roadmap-date-trigger:focus-visible .date-visual {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+#roadmapProjectsList .roadmap-role-trigger {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+#roadmapProjectsList .roadmap-role-trigger:hover,
+#roadmapProjectsList .roadmap-role-trigger:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.roadmap-role-editor-panel {
+  margin-top: 0.45rem;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 0.6rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.roadmap-role-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.roadmap-assignment-form {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 0.45rem;
+  align-items: end;
+}
+
+.roadmap-add-assignment-section {
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  border-radius: 8px;
+  padding: 0.5rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.roadmap-add-assignment-section h4 {
+  margin: 0;
+  font-size: 0.73rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
 }
 
 #overviewProjectsList .list-header > span:nth-child(1),
@@ -530,6 +689,16 @@ button.warn {
   border: 1px solid var(--line);
 }
 
+[data-edit-key].live-edit-active {
+  outline: 2px solid color-mix(in srgb, var(--accent-2) 65%, transparent);
+  outline-offset: 1px;
+}
+
+[data-edit-key].live-edit-remote {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-2) 55%, var(--line));
+  background: color-mix(in srgb, var(--surface-soft) 88%, var(--accent-2) 12%);
+}
+
 .list-cell {
   min-width: 0;
   overflow: hidden;
@@ -562,6 +731,29 @@ button.warn {
 #overviewProjectsList .list-header,
 #overviewProjectsList .list-row {
   grid-template-columns: minmax(170px, 1.2fr) repeat(5, minmax(92px, 0.72fr)) minmax(78px, 0.62fr) minmax(120px, 0.95fr);
+}
+
+/* Clip row cell content to its own column in Projects/Roadmap tables. */
+#overviewProjectsList .list-row > .list-cell,
+#roadmapProjectsList .list-row > .list-cell {
+  justify-self: stretch;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#overviewProjectsList,
+#roadmapProjectsList {
+  overflow-x: auto;
+}
+
+#overviewProjectsList .list-header,
+#overviewProjectsList .list-row,
+#roadmapProjectsList .list-header,
+#roadmapProjectsList .list-row {
+  min-width: max-content;
 }
 
 #roadmapProjectsList .list-header,
@@ -864,6 +1056,23 @@ button.warn {
 .meta {
   font-family: var(--mono);
   font-size: 0.78rem;
+}
+
+.date-visual {
+  display: inline-block;
+  font-weight: 600;
+}
+
+.date-visual.date-past {
+  color: color-mix(in srgb, var(--danger) 70%, var(--text));
+}
+
+.date-visual.date-soon {
+  color: color-mix(in srgb, var(--accent-2) 80%, var(--text));
+}
+
+.date-visual.date-future {
+  color: color-mix(in srgb, #1f6a35 72%, var(--text));
 }
 
 .output {
@@ -1395,6 +1604,7 @@ button.warn {
   border-color: var(--accent);
   color: var(--accent);
   font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--accent), inset -2px 0 0 var(--accent);
 }
 
 .timeline-cell.current-week,
@@ -1455,6 +1665,10 @@ button.warn {
 @media (max-width: 860px) {
   .grid.two,
   .grid.three {
+    grid-template-columns: 1fr;
+  }
+
+  .conflict-columns {
     grid-template-columns: 1fr;
   }
 }

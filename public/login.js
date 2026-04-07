@@ -1,5 +1,3 @@
-const AUTH_TOKEN_KEY = 'projection_google_id_token';
-const AUTH_EMAIL_KEY = 'projection_google_email';
 const THEME_MODE_KEY = 'projection_theme_mode';
 const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
@@ -60,25 +58,21 @@ const setStatus = (message) => {
   el.loginStatus.textContent = message;
 };
 
-const decodeJwtEmail = (token) => {
-  try {
-    const payload = token.split('.')[1];
-    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
-    const decoded = JSON.parse(atob(normalized));
-    return decoded.email || null;
-  } catch {
-    return null;
-  }
-};
-
-const verifyToken = async (token) => {
-  const response = await fetch('/api/v1/projects', {
+const hasActiveSession = async () => {
+  const response = await fetch('/api/v1/auth/session', {
+    method: 'GET',
+    credentials: 'same-origin',
     headers: {
-      Authorization: `Bearer ${token}`
+      'Content-Type': 'application/json'
     }
   });
 
-  return response.ok;
+  if (!response.ok) {
+    return false;
+  }
+
+  const body = await response.json();
+  return Boolean(body?.authenticated);
 };
 
 const waitForGoogleIdentity = async (timeoutMs = 8000, pollIntervalMs = 100) => {
@@ -103,22 +97,42 @@ const startLogin = async () => {
   const reason = params.get('reason') || '';
   const reasonMessage = REASON_MESSAGES[reason] || '';
 
-  const existingToken = sessionStorage.getItem(AUTH_TOKEN_KEY);
-  if (existingToken) {
-    const ok = await verifyToken(existingToken);
-    if (ok) {
-      window.location.href = '/';
-      return;
-    }
-    sessionStorage.removeItem(AUTH_TOKEN_KEY);
-    sessionStorage.removeItem(AUTH_EMAIL_KEY);
+  if (await hasActiveSession()) {
+    window.location.href = '/';
+    return;
   }
 
   const configResponse = await fetch('/api/v1/auth/google/config');
   const config = await configResponse.json();
 
-  if (!config.enabled) {
+  if (!config.enabled && !config.devBypassEnabled) {
     setStatus('Google login is not configured on this server.');
+    return;
+  }
+
+  if (config.devBypassEnabled) {
+    const btn = document.createElement('button');
+    btn.id = 'devBypassButton';
+    btn.textContent = 'Dev Login (bypass)';
+    btn.style.cssText = 'margin: 0.8rem 0; padding: 0.5rem 1.2rem; cursor: pointer; font-size: 0.95rem; border: 2px dashed #f90; background: transparent; color: inherit; border-radius: 4px;';
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      setStatus('Signing in via dev bypass...');
+      try {
+        const r = await fetch('/api/v1/auth/dev-bypass', { method: 'POST', credentials: 'same-origin' });
+        if (!r.ok) {
+          setStatus('Dev bypass failed.');
+          btn.disabled = false;
+          return;
+        }
+        window.location.href = '/';
+      } catch {
+        setStatus('Dev bypass request failed.');
+        btn.disabled = false;
+      }
+    });
+    el.loginGoogleButton.appendChild(btn);
+    setStatus(reasonMessage || 'Dev mode: use the bypass button to sign in.');
     return;
   }
 
@@ -128,24 +142,33 @@ const startLogin = async () => {
     return;
   }
 
+  // eslint-disable-next-line no-console
+  console.log('[Projection] Initialising Google Sign-In', { origin: window.location.origin, clientId: config.clientId });
+
   const domainLine = `Sign in with your @${config.allowedEmailDomain} account.`;
   setStatus(reasonMessage ? `${reasonMessage} ${domainLine}` : domainLine);
 
   window.google.accounts.id.initialize({
     client_id: config.clientId,
+    // Disable FedCM so the classic GSI button flow is used; FedCM has
+    // stricter origin enforcement that can lag behind Console changes.
+    use_fedcm_for_prompt: false,
     callback: async (response) => {
-      const token = response.credential;
-      const ok = await verifyToken(token);
-      if (!ok) {
+      const idToken = response.credential;
+      const sessionResponse = await fetch('/api/v1/auth/google/session', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ idToken })
+      });
+
+      if (!sessionResponse.ok) {
         setStatus(`Sign-in failed. Use a valid @${config.allowedEmailDomain} account.`);
         return;
       }
 
-      sessionStorage.setItem(AUTH_TOKEN_KEY, token);
-      const email = decodeJwtEmail(token);
-      if (email) {
-        sessionStorage.setItem(AUTH_EMAIL_KEY, email);
-      }
       window.location.href = '/';
     }
   });
@@ -155,6 +178,26 @@ const startLogin = async () => {
     size: 'large',
     text: 'signin_with'
   });
+
+  // If Google rejects the current origin/client pairing, the button often never renders.
+  window.setTimeout(() => {
+    if (!el.loginGoogleButton?.children?.length) {
+      // eslint-disable-next-line no-console
+      console.error('[Projection] renderButton produced no children after 500ms — Google likely rejected the origin.');
+      const origin = window.location.origin;
+      setStatus(
+        `Google Sign-In could not render. Verify OAuth Web client ${config.clientId} allows origin ${origin} in Authorized JavaScript origins.`
+      );
+      // eslint-disable-next-line no-console
+      console.error(
+        '[Projection] Google Sign-In blocked — OAuth origin not allowed.\n\n' +
+        `  Current origin : ${origin}\n` +
+        `  OAuth client ID: ${config.clientId}\n\n` +
+        '  Fix: Google Cloud Console → Credentials → open that client ID\n' +
+        `  → Authorized JavaScript origins → add exactly: ${origin}`
+      );
+    }
+  }, 500);
 };
 
 startLogin().catch((error) => {
