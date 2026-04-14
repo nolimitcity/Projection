@@ -10,6 +10,7 @@ import {
   Person,
   Project,
   ProjectAssignment,
+  ProjectStatus,
   ProjectTemplate,
   RoleDefinition,
   UserAccount
@@ -117,8 +118,181 @@ const SEED_TEMPLATE_DEFINITIONS: Array<{
   }
 ];
 
+const ROADMAP_PROJECT_SEEDS: Array<{ name: string; startDate: string; releaseDate: string; status: ProjectStatus }> = [
+  { name: "Creepy Carnival", startDate: "2015-05-26", releaseDate: "2015-05-26", status: "completed" },
+  { name: "Creepy Carnival (mobile)", startDate: "2015-12-02", releaseDate: "2015-12-02", status: "completed" },
+  { name: "Space Arcade", startDate: "2016-08-31", releaseDate: "2016-08-31", status: "completed" },
+  { name: "Oktoberfest", startDate: "2016-11-15", releaseDate: "2016-11-15", status: "completed" },
+  { name: "Kitchen Drama Sushi Mania", startDate: "2017-04-12", releaseDate: "2017-04-12", status: "completed" },
+  { name: "Wixx", startDate: "2017-10-31", releaseDate: "2017-10-31", status: "completed" },
+  { name: "Kitchen Drama BBQ Frenzy", startDate: "2017-11-29", releaseDate: "2017-11-29", status: "completed" },
+  { name: "Casino Win Spin", startDate: "2018-01-31", releaseDate: "2018-01-31", status: "completed" },
+  { name: "Tesla Jolt", startDate: "2018-03-29", releaseDate: "2018-03-29", status: "completed" },
+  { name: "Coins of Fortune", startDate: "2018-06-28", releaseDate: "2018-06-28", status: "completed" },
+  { name: "Hot Nudge", startDate: "2018-07-26", releaseDate: "2018-07-26", status: "completed" },
+  { name: "Dungeon Quest", startDate: "2018-09-27", releaseDate: "2018-09-27", status: "completed" },
+  { name: "Ice Ice Yeti", startDate: "2018-11-15", releaseDate: "2018-11-15", status: "completed" },
+  { name: "Fruits", startDate: "2019-01-30", releaseDate: "2019-01-30", status: "completed" },
+  { name: "Owls", startDate: "2019-02-27", releaseDate: "2019-02-27", status: "completed" },
+  { name: "Starstruck", startDate: "2019-03-27", releaseDate: "2019-03-27", status: "completed" },
+  { name: "Tombstone", startDate: "2019-05-02", releaseDate: "2019-05-02", status: "completed" },
+  { name: "Mayan Magic Wildfire", startDate: "2019-06-04", releaseDate: "2019-06-04", status: "completed" },
+  { name: "Tractor Beam", startDate: "2019-07-02", releaseDate: "2019-07-02", status: "completed" },
+  { name: "The Creepy Carnival (remake)", startDate: "2019-07-16", releaseDate: "2019-07-16", status: "completed" },
+  { name: "Thor Hammer Time", startDate: "2019-08-01", releaseDate: "2019-08-01", status: "completed" },
+  { name: "Hot 4 Cash", startDate: "2019-08-15", releaseDate: "2019-08-15", status: "completed" },
+  { name: "Pixies vs Pirates", startDate: "2019-09-03", releaseDate: "2019-09-03", status: "completed" },
+  { name: "Manhattan Goes Wild", startDate: "2019-10-02", releaseDate: "2019-10-02", status: "completed" },
+  { name: "Tomb of Nefertiti", startDate: "2019-11-05", releaseDate: "2019-11-05", status: "completed" },
+  { name: "Dragon Tribe", startDate: "2019-12-12", releaseDate: "2019-12-12", status: "completed" },
+  { name: "Poison Eve", startDate: "2020-01-07", releaseDate: "2020-01-07", status: "completed" },
+  { name: "Punk Rocker", startDate: "2020-02-12", releaseDate: "2020-02-12", status: "completed" },
+  { name: "Barbarian Fury", startDate: "2020-03-03", releaseDate: "2020-03-03", status: "completed" },
+  { name: "Gaelic Gold", startDate: "2020-03-16", releaseDate: "2020-03-16", status: "completed" },
+  { name: "Harlequin Carnival", startDate: "2020-04-07", releaseDate: "2020-04-07", status: "completed" },
+  { name: "Deadwood xNudge", startDate: "2020-05-06", releaseDate: "2020-05-06", status: "completed" },
+  { name: "Bonus Bunnies", startDate: "2020-06-09", releaseDate: "2020-06-09", status: "completed" },
+  { name: "Milky Ways", startDate: "2020-06-24", releaseDate: "2020-06-24", status: "completed" },
+  { name: "Golden Genie", startDate: "2020-07-07", releaseDate: "2020-07-07", status: "completed" },
+  { name: "Immortal Fruits", startDate: "2020-08-04", releaseDate: "2020-08-04", status: "completed" },
+  { name: "Book of Shadows", startDate: "2020-08-20", releaseDate: "2020-08-20", status: "completed" },
+  { name: "Buffalo Hunter", startDate: "2020-09-08", releaseDate: "2020-09-08", status: "completed" },
+  { name: "Monkey's Gold", startDate: "2020-10-13", releaseDate: "2020-10-13", status: "completed" },
+  { name: "Warrior Graveyard", startDate: "2020-11-03", releaseDate: "2020-11-03", status: "completed" },
+  { name: "Tomb of Akhenaten", startDate: "2020-12-15", releaseDate: "2020-12-15", status: "completed" },
+  { name: "San Quentin", startDate: "2021-01-12", releaseDate: "2021-01-12", status: "completed" },
+  { name: "East Coast vs West Coast", startDate: "2021-02-02", releaseDate: "2021-02-02", status: "completed" },
+  { name: "Fire in the hole", startDate: "2021-03-02", releaseDate: "2021-03-02", status: "completed" },
+  { name: "Bushido Ways xNudge", startDate: "2021-04-13", releaseDate: "2021-04-13", status: "completed" },
+  { name: "El Paso Gunfight xNudge", startDate: "2021-05-04", releaseDate: "2021-05-04", status: "completed" },
+  { name: "Infectious 5 xWays", startDate: "2021-06-01", releaseDate: "2021-06-01", status: "completed" },
+  { name: "xWays Hoarder xSplit", startDate: "2021-07-06", releaseDate: "2021-07-06", status: "completed" },
+  { name: "Mental", startDate: "2021-08-31", releaseDate: "2021-08-31", status: "completed" },
+  { name: "Das xBoot", startDate: "2021-09-14", releaseDate: "2021-09-14", status: "completed" },
+  { name: "Evil Goblins xBomb", startDate: "2021-10-12", releaseDate: "2021-10-12", status: "completed" },
+  { name: "Legion X", startDate: "2021-11-30", releaseDate: "2021-11-30", status: "completed" },
+  { name: "True Grit", startDate: "2021-12-21", releaseDate: "2021-12-21", status: "completed" },
+  { name: "Tombstone R.I.P", startDate: "2022-01-11", releaseDate: "2022-01-11", status: "completed" },
+  { name: "Punk Toilet", startDate: "2022-02-08", releaseDate: "2022-02-08", status: "completed" },
+  { name: "Misery mining (FITH 2)", startDate: "2022-03-15", releaseDate: "2022-03-15", status: "completed" },
+  { name: "Remember Gulag", startDate: "2022-04-19", releaseDate: "2022-04-19", status: "completed" },
+  { name: "Karen Maneater (Hoarder 2)", startDate: "2022-05-10", releaseDate: "2022-05-10", status: "completed" },
+  { name: "Folsom Prison (SQ 2)", startDate: "2022-06-14", releaseDate: "2022-06-14", status: "completed" },
+  { name: "The Rave", startDate: "2022-07-12", releaseDate: "2022-07-12", status: "completed" },
+  { name: "Road Rage", startDate: "2022-08-16", releaseDate: "2022-08-16", status: "completed" },
+  { name: "The Border", startDate: "2022-09-13", releaseDate: "2022-09-13", status: "completed" },
+  { name: "Little Bighorn", startDate: "2022-10-11", releaseDate: "2022-10-11", status: "completed" },
+  { name: "Serial", startDate: "2022-11-08", releaseDate: "2022-11-08", status: "completed" },
+  { name: "Rock Bottom", startDate: "2022-11-22", releaseDate: "2022-11-22", status: "completed" },
+  { name: "Pearl Harbor (xBoot 2)", startDate: "2022-12-07", releaseDate: "2022-12-07", status: "completed" },
+  { name: "Dead Canary", startDate: "2022-12-20", releaseDate: "2022-12-20", status: "completed" },
+  { name: "Walk of Shame", startDate: "2023-01-17", releaseDate: "2023-01-17", status: "completed" },
+  { name: "Benji killed in Vegas (EvsW2)", startDate: "2023-02-07", releaseDate: "2023-02-07", status: "completed" },
+  { name: "Blood & Shadow", startDate: "2023-03-07", releaseDate: "2023-03-07", status: "completed" },
+  { name: "Kiss My Chainsaw", startDate: "2023-04-11", releaseDate: "2023-04-11", status: "completed" },
+  { name: "Disturbed (Mental 2 pre)", startDate: "2023-05-09", releaseDate: "2023-05-09", status: "completed" },
+  { name: "Whacked!", startDate: "2023-05-23", releaseDate: "2023-05-23", status: "completed" },
+  { name: "Gluttony", startDate: "2023-06-06", releaseDate: "2023-06-06", status: "completed" },
+  { name: "The Cage", startDate: "2023-06-20", releaseDate: "2023-06-20", status: "completed" },
+  { name: "Bounty Hunter xNudge", startDate: "2023-07-11", releaseDate: "2023-07-11", status: "completed" },
+  { name: "True Kult", startDate: "2023-08-08", releaseDate: "2023-08-08", status: "completed" },
+  { name: "DJ P5ychØ", startDate: "2023-08-22", releaseDate: "2023-08-22", status: "completed" },
+  { name: "The Crypt", startDate: "2023-09-05", releaseDate: "2023-09-05", status: "completed" },
+  { name: "Space Donkey", startDate: "2023-10-03", releaseDate: "2023-10-03", status: "completed" },
+  { name: "Ugliest Catch", startDate: "2023-10-17", releaseDate: "2023-10-17", status: "completed" },
+  { name: "Roadkill", startDate: "2023-11-07", releaseDate: "2023-11-07", status: "completed" },
+  { name: "Nine To Five", startDate: "2023-11-21", releaseDate: "2023-11-21", status: "completed" },
+  { name: "Jingle Balls", startDate: "2023-12-05", releaseDate: "2023-12-05", status: "completed" },
+  { name: "Devil's Crossroad", startDate: "2024-01-09", releaseDate: "2024-01-09", status: "completed" },
+  { name: "Land of the free", startDate: "2024-01-23", releaseDate: "2024-01-23", status: "completed" },
+  { name: "D Day", startDate: "2024-02-13", releaseDate: "2024-02-13", status: "completed" },
+  { name: "FITH 2", startDate: "2024-02-20", releaseDate: "2024-02-20", status: "completed" },
+  { name: "Possessed", startDate: "2024-03-05", releaseDate: "2024-03-05", status: "completed" },
+  { name: "Brick Snake 2000", startDate: "2024-03-21", releaseDate: "2024-03-21", status: "completed" },
+  { name: "Tombstone No Mercy", startDate: "2024-04-16", releaseDate: "2024-04-16", status: "completed" },
+  { name: "Kenneth must die", startDate: "2024-05-07", releaseDate: "2024-05-07", status: "completed" },
+  { name: "Loner", startDate: "2024-05-21", releaseDate: "2024-05-21", status: "completed" },
+  { name: "Deadwood RIP", startDate: "2024-06-04", releaseDate: "2024-06-04", status: "completed" },
+  { name: "Beheaded", startDate: "2024-06-18", releaseDate: "2024-06-18", status: "completed" },
+  { name: "Punk Rocker 2", startDate: "2024-07-09", releaseDate: "2024-07-09", status: "completed" },
+  { name: "Apocalypse Super xNudge", startDate: "2024-07-23", releaseDate: "2024-07-23", status: "completed" },
+  { name: "Outsourced", startDate: "2024-08-06", releaseDate: "2024-08-06", status: "completed" },
+  { name: "Stockholm Syndrome", startDate: "2024-08-20", releaseDate: "2024-08-20", status: "completed" },
+  { name: "Skate or Die", startDate: "2024-09-10", releaseDate: "2024-09-10", status: "completed" },
+  { name: "San Quentin 2: Death Row", startDate: "2024-09-24", releaseDate: "2024-09-24", status: "completed" },
+  { name: "Brute Force", startDate: "2024-10-08", releaseDate: "2024-10-08", status: "completed" },
+  { name: "Blood & Shadow 2", startDate: "2024-10-22", releaseDate: "2024-10-22", status: "completed" },
+  { name: "Outsourced: Slash game", startDate: "2024-11-05", releaseDate: "2024-11-05", status: "completed" },
+  { name: "Munchies (Decadence), (SHORT PROD)", startDate: "2024-11-19", releaseDate: "2024-11-19", status: "completed" },
+  { name: "Tanked", startDate: "2024-12-03", releaseDate: "2024-12-03", status: "completed" },
+  { name: "Outsourced: Payday", startDate: "2024-12-17", releaseDate: "2024-12-17", status: "completed" },
+  { name: "xWays Hoarder 2", startDate: "2025-01-14", releaseDate: "2025-01-14", status: "completed" },
+  { name: "Tombstone Slaughter: El Gordos Revenge", startDate: "2025-01-28", releaseDate: "2025-01-28", status: "completed" },
+  { name: "Duck Hunters", startDate: "2025-02-11", releaseDate: "2025-02-11", status: "completed" },
+  { name: "Dead, Dead Or Deader", startDate: "2025-02-25", releaseDate: "2025-02-25", status: "completed" },
+  { name: "Home of the Brave", startDate: "2025-03-11", releaseDate: "2025-03-11", status: "completed" },
+  { name: "Mental 2", startDate: "2025-03-25", releaseDate: "2025-03-25", status: "completed" },
+  { name: "Blood Diamond", startDate: "2025-04-08", releaseDate: "2025-04-08", status: "completed" },
+  { name: "Highway to Hell", startDate: "2025-04-22", releaseDate: "2025-04-22", status: "completed" },
+  { name: "Kill Em All", startDate: "2025-05-20", releaseDate: "2025-05-20", status: "completed" },
+  { name: "Fire In The Hole 3", startDate: "2025-06-03", releaseDate: "2025-06-03", status: "completed" },
+  { name: "Flight Mode", startDate: "2025-06-17", releaseDate: "2025-06-17", status: "completed" },
+  { name: "Brute Force: Alien Onslaught", startDate: "2025-07-08", releaseDate: "2025-07-08", status: "completed" },
+  { name: "Tsar Wars", startDate: "2025-07-22", releaseDate: "2025-07-22", status: "completed" },
+  { name: "Seamen", startDate: "2025-08-05", releaseDate: "2025-08-05", status: "completed" },
+  { name: "Gator Hunters", startDate: "2025-08-19", releaseDate: "2025-08-19", status: "completed" },
+  { name: "Dead Men Walking", startDate: "2025-09-09", releaseDate: "2025-09-09", status: "completed" },
+  { name: "Breakout", startDate: "2025-10-14", releaseDate: "2025-10-14", status: "completed" },
+  { name: "Bangkok Hilton", startDate: "2025-10-28", releaseDate: "2025-10-28", status: "completed" },
+  { name: "Disorder", startDate: "2025-05-08", releaseDate: "2025-11-04", status: "completed" },
+  { name: "Bizarre", startDate: "2025-11-18", releaseDate: "2025-11-18", status: "completed" },
+  { name: "Crazy Ex-Girlfriend", startDate: "2025-12-02", releaseDate: "2025-12-02", status: "completed" },
+  { name: "Duck Hunters 16K", startDate: "2025-12-15", releaseDate: "2025-12-15", status: "completed" },
+  { name: "Das xBoot Zwei!", startDate: "2025-06-19", releaseDate: "2025-12-16", status: "completed" },
+  { name: "Duck Hunters: Happy Hour", startDate: "2026-01-13", releaseDate: "2026-01-13", status: "completed" },
+  { name: "Golden Shower", startDate: "2026-01-27", releaseDate: "2026-01-27", status: "completed" },
+  { name: "Supersized", startDate: "2026-02-10", releaseDate: "2026-02-10", status: "completed" },
+  { name: "San Quentin Manhunt (Stake)", startDate: "2026-02-12", releaseDate: "2026-02-12", status: "completed" },
+  { name: "The Crypt 2", startDate: "2026-03-03", releaseDate: "2026-03-03", status: "completed" },
+  { name: "Catfish Hunters", startDate: "2026-03-17", releaseDate: "2026-03-17", status: "completed" },
+  { name: "Pünk Rocker 3", startDate: "2026-04-07", releaseDate: "2026-04-07", status: "active" },
+  { name: "San Quentin Manhunt - global release", startDate: "2026-04-21", releaseDate: "2026-04-21", status: "active" },
+  { name: "Bonus Junkie", startDate: "2026-04-23", releaseDate: "2026-04-23", status: "active" },
+  { name: "Tombstone Begins", startDate: "2026-05-12", releaseDate: "2026-05-12", status: "active" },
+  { name: "True Grit Redemption 2", startDate: "2026-05-26", releaseDate: "2026-05-26", status: "active" },
+  { name: "Tanked 3: First Blood 2", startDate: "2026-06-09", releaseDate: "2026-06-09", status: "active" },
+  { name: "Soaked By Seamen", startDate: "2026-06-23", releaseDate: "2026-06-23", status: "active" },
+  { name: "AFK Airport Security", startDate: "2026-07-07", releaseDate: "2026-07-07", status: "active" },
+  { name: "Duck Hunters 2", startDate: "2026-07-28", releaseDate: "2026-07-28", status: "active" },
+  { name: "Outsourced 2 - Balkan Engineering", startDate: "2026-08-11", releaseDate: "2026-08-11", status: "active" },
+  { name: "Six Feet Under", startDate: "2026-08-25", releaseDate: "2026-08-25", status: "active" },
+  { name: "Borken", startDate: "2026-09-08", releaseDate: "2026-09-08", status: "active" },
+  { name: "FITH4", startDate: "2026-09-22", releaseDate: "2026-09-22", status: "active" },
+  { name: "Bowel of Beelzebub", startDate: "2026-10-06", releaseDate: "2026-10-06", status: "active" },
+  { name: "Feed em to the pigs (NOT BIZARRE)", startDate: "2027-01-05", releaseDate: "2027-01-05", status: "active" },
+  { name: "Gator Hunters 2", startDate: "2026-11-24", releaseDate: "2026-11-24", status: "active" },
+  { name: "Concept X", startDate: "2026-12-08", releaseDate: "2026-12-08", status: "active" },
+  { name: "Broligarchs", startDate: "2027-01-05", releaseDate: "2027-01-05", status: "active" },
+  { name: "Mental III", startDate: "2027-02-09", releaseDate: "2027-02-09", status: "active" },
+  { name: "Maggot", startDate: "2027-04-20", releaseDate: "2027-04-20", status: "active" },
+  { name: "TheCryptMickeyMouseClub (Exploring)", startDate: "2026-09-08", releaseDate: "2026-09-08", status: "active" },
+  { name: "Bass to Mouth", startDate: "2028-01-01", releaseDate: "2028-01-01", status: "active" },
+  { name: "Alien Lean", startDate: "2027-03-09", releaseDate: "2027-03-09", status: "active" },
+  { name: "Medieval on your ass", startDate: "2027-03-23", releaseDate: "2027-03-23", status: "active" },
+  { name: "Dental", startDate: "2027-01-05", releaseDate: "2027-01-05", status: "active" },
+  { name: "Kenneth is Erected", startDate: "2028-01-01", releaseDate: "2028-01-01", status: "active" },
+  { name: "Death By Bingo", startDate: "2028-01-01", releaseDate: "2028-01-01", status: "active" },
+  { name: "Dead Canary Straight-Up Reels", startDate: "2027-02-23", releaseDate: "2027-02-23", status: "active" },
+  { name: "Flight Mode 2 - Hijacked", startDate: "2027-01-19", releaseDate: "2027-01-19", status: "active" },
+  { name: "Masked Swinger", startDate: "2027-04-06", releaseDate: "2027-04-06", status: "active" },
+  { name: "Horseface", startDate: "2028-01-01", releaseDate: "2028-01-01", status: "active" },
+  { name: "Skins - Per. Outsourced. DH, FITH2, SQ, Nine to Five, etc.", startDate: "2028-01-01", releaseDate: "2028-01-01", status: "active" },
+  { name: "Kenneth must die light skin", startDate: "2028-01-01", releaseDate: "2028-01-01", status: "active" },
+  { name: "Vanilla Duck Hunters US-skin", startDate: "2028-01-01", releaseDate: "2028-01-01", status: "active" }
+];
+
 // Increment this constant whenever a new migration block is added to loadSnapshot.
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const createSeedSnapshot = (): StoreSnapshot => {
   const seedAdminAt = now();
@@ -184,70 +358,28 @@ const createSeedSnapshot = (): StoreSnapshot => {
     }
   ];
 
-  const projects: Project[] = [
-    {
+  const projects: Project[] = ROADMAP_PROJECT_SEEDS.map((seedProject) => {
+    const projectSettings = cloneTemplateSettings(
+      seedProject.status === "active" ? templates[0].settings : templates[1].settings
+    );
+
+    return {
       id: uuidv4(),
-      name: "Platform Modernization",
-      comments: "Core platform upgrade",
-      releaseDate: "2026-09-30",
-      startDate: "2026-04-22",
-      targetEndDate: "2026-09-30",
-      adjustedEndDate: "2026-09-30",
+      name: seedProject.name,
+      comments: "",
+      releaseDate: seedProject.releaseDate,
+      startDate: seedProject.startDate,
+      targetEndDate: seedProject.releaseDate,
+      adjustedEndDate: seedProject.releaseDate,
       scheduleDelayDays: 0,
-      settings: {
-        defaultCapacityHoursPerDay: 8,
-        notificationProfile: "standard",
-        workWeek: {
-          timezone: "Europe/Copenhagen",
-          workingDays: [1, 2, 3, 4, 5],
-          dailyHours: 8,
-          holidayCalendar: "DK"
-        },
-        milestoneOffsets: {
-          exclusiveLeadDays: 7,
-          certificationLeadDays: 42,
-          productionLengthDays: 84,
-          preProductionLengthDays: 28
-        }
-      },
-      status: "active",
+      settings: projectSettings,
+      status: seedProject.status,
       createdAt: now(),
-      createdBy: "seed-owner",
+      createdBy: "seed-import",
       updatedAt: now(),
       source: { type: "blank" }
-    },
-    {
-      id: uuidv4(),
-      name: "Archived ERP Rollout",
-      comments: "Completed rollout",
-      releaseDate: "2025-10-01",
-      startDate: "2025-03-26",
-      targetEndDate: "2025-10-01",
-      adjustedEndDate: "2025-10-01",
-      scheduleDelayDays: 0,
-      settings: {
-        defaultCapacityHoursPerDay: 8,
-        notificationProfile: "minimal",
-        workWeek: {
-          timezone: "Europe/Copenhagen",
-          workingDays: [1, 2, 3, 4, 5],
-          dailyHours: 8,
-          holidayCalendar: "DK"
-        },
-        milestoneOffsets: {
-          exclusiveLeadDays: 7,
-          certificationLeadDays: 42,
-          productionLengthDays: 112,
-          preProductionLengthDays: 28
-        }
-      },
-      status: "completed",
-      createdAt: now(),
-      createdBy: "seed-admin",
-      updatedAt: now(),
-      source: { type: "blank" }
-    }
-  ];
+    };
+  });
 
   const globalClosures: GlobalClosure[] = [
     {
@@ -276,6 +408,7 @@ const createSeedSnapshot = (): StoreSnapshot => {
       office: "Sthlm",
       weeklyCapacityHours: 40,
       workingDays: [1, 2, 3, 4, 5],
+      isActive: true,
       createdAt: now(),
       createdBy: "seed-admin",
       updatedAt: now()
@@ -287,6 +420,7 @@ const createSeedSnapshot = (): StoreSnapshot => {
       office: "Sthlm",
       weeklyCapacityHours: 40,
       workingDays: [1, 2, 3, 4, 5],
+      isActive: true,
       createdAt: now(),
       createdBy: "seed-admin",
       updatedAt: now()
@@ -298,6 +432,7 @@ const createSeedSnapshot = (): StoreSnapshot => {
       office: "India",
       weeklyCapacityHours: 40,
       workingDays: [1, 2, 3, 4, 5],
+      isActive: true,
       createdAt: now(),
       createdBy: "seed-admin",
       updatedAt: now()
@@ -760,6 +895,16 @@ export class SqliteStore implements ProjectionStore {
       snapshot.assignments.forEach((assignment) => {
         if (!("updatedAt" in assignment) || !(assignment as ProjectAssignment & { updatedAt?: string }).updatedAt) {
           (assignment as ProjectAssignment & { updatedAt: string }).updatedAt = assignment.createdAt || now();
+          migrated = true;
+        }
+      });
+    }
+
+    // v4: person active-state support
+    if (currentVersion < 4) {
+      snapshot.people.forEach((person) => {
+        if (!("isActive" in person) || (person as Person & { isActive?: boolean }).isActive === undefined) {
+          (person as Person & { isActive: boolean }).isActive = true;
           migrated = true;
         }
       });

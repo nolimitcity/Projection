@@ -129,12 +129,23 @@ const closureCreateSchema = z.object({
   endDate: z.string().date()
 });
 
+const closureUpdateSchema = z
+  .object({
+    label: z.string().min(1).optional(),
+    startDate: z.string().date().optional(),
+    endDate: z.string().date().optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided for update."
+  });
+
 const personCreateSchema = z.object({
   name: z.string().min(1),
   primaryRoleCode: z.string().min(1),
   office: z.string().min(1),
   weeklyCapacityHours: z.number().positive().max(80),
   workingDays: z.array(z.number().int().min(1).max(7)).min(1).optional(),
+  isActive: z.boolean().optional(),
   expectedUpdatedAt: z.string().datetime().optional()
 });
 
@@ -412,6 +423,13 @@ export const createRouter = (store: ProjectionStore) => {
     const body = closureCreateSchema.parse(req.body);
     const created = projectService.createGlobalClosure(getActor(req), body);
     res.status(201).json(created);
+  });
+
+  router.patch("/api/v1/global-closures/:id", (req: Request, res: Response) => {
+    const { id } = pathIdSchema.parse(req.params);
+    const body = closureUpdateSchema.parse(req.body);
+    const updated = projectService.updateGlobalClosure(getActor(req), id, body);
+    res.status(200).json(updated);
   });
 
   router.delete("/api/v1/global-closures/:id", (req: Request, res: Response) => {

@@ -1,5 +1,6 @@
 const THEME_MODE_KEY = 'projection_theme_mode';
 const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+const THEME_TOGGLE_ICON = '<svg class="theme-toggle-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle class="theme-sun" cx="12" cy="12" r="4"></circle><path d="M12 2v3M12 19v3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M2 12h3M19 12h3M4.93 19.07l2.12-2.12M16.95 7.05l2.12-2.12" stroke-width="1.7" stroke-linecap="round"/></svg>';
 
 const el = {
   loginGoogleButton: document.querySelector('#loginGoogleButton'),
@@ -18,7 +19,7 @@ const refreshThemeToggle = () => {
   const mode = normalizeThemeMode(localStorage.getItem(THEME_MODE_KEY));
   const activeTheme = document.documentElement.dataset.theme || resolvedTheme(mode);
   el.themeToggle.dataset.theme = activeTheme;
-  el.themeToggle.textContent = '◐';
+  el.themeToggle.innerHTML = THEME_TOGGLE_ICON;
   el.themeToggle.setAttribute('aria-label', activeTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
   el.themeToggle.title = activeTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
 };

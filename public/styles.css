@@ -1,20 +1,23 @@
 :root {
-  --bg: #f6f7f4;
+  --bg: #f3f5f1;
   --surface: #ffffff;
-  --surface-soft: #eef2ee;
-  --surface-contrast: #fbfcfa;
+  --surface-soft: #ebf0ea;
+  --surface-contrast: #f9fbf8;
   --text: #15202b;
-  --muted: #51606d;
+  --muted: #4f606e;
   --accent: #1d5d4f;
   --accent-2: #f2a65a;
-  --line: #d7dfd7;
+  --line: #ccd8d1;
   --danger: #b42318;
   --input-bg: #ffffff;
-  --button-bg: #edf0ec;
+  --button-bg: #edf2ee;
   --range-bg: rgba(255, 255, 255, 0.8);
-  --bar-bg: #edf0ec;
+  --bar-bg: #ebf1ec;
   --shape-a: #f2a65a;
   --shape-b: #1d5d4f;
+  --shape-c: #6f8f84;
+  --panel-shadow: 0 16px 34px rgba(21, 32, 43, 0.08);
+  --focus-ring: 0 0 0 2px rgba(29, 93, 79, 0.45), 0 0 0 5px rgba(242, 166, 90, 0.2);
   --timeline-zero-bg: #f3f5f3;
   --timeline-zero-text: #5c6a66;
   --timeline-low-bg: #d9ece7;
@@ -33,21 +36,24 @@
 
 :root[data-theme='dark'] {
   --bg: #11161b;
-  --surface: #1a232c;
-  --surface-soft: #222d38;
-  --surface-contrast: #1d2832;
+  --surface: #18212a;
+  --surface-soft: #1f2a34;
+  --surface-contrast: #1c2731;
   --text: #e3edf3;
   --muted: #9bb0c0;
   --accent: #4db49e;
   --accent-2: #f0b168;
-  --line: #2f3d4a;
+  --line: #31404d;
   --danger: #ef8f84;
-  --input-bg: #111922;
+  --input-bg: #111920;
   --button-bg: #22303a;
   --range-bg: rgba(26, 35, 44, 0.88);
-  --bar-bg: #2a3742;
+  --bar-bg: #273540;
   --shape-a: #815a2f;
   --shape-b: #275347;
+  --shape-c: #334756;
+  --panel-shadow: 0 20px 36px rgba(0, 0, 0, 0.34);
+  --focus-ring: 0 0 0 2px rgba(77, 180, 158, 0.45), 0 0 0 5px rgba(240, 177, 104, 0.2);
   --timeline-zero-bg: #1a242d;
   --timeline-zero-text: #95a8b5;
   --timeline-low-bg: #1f4a41;
@@ -79,8 +85,9 @@ body {
   margin: 0;
   font-family: var(--ui);
   color: var(--text);
-  background: radial-gradient(circle at top right, color-mix(in srgb, var(--shape-a) 36%, transparent), transparent 34%),
-    radial-gradient(circle at bottom left, color-mix(in srgb, var(--shape-b) 28%, transparent), transparent 28%),
+  background: radial-gradient(circle at 92% -8%, color-mix(in srgb, var(--shape-a) 34%, transparent), transparent 38%),
+    radial-gradient(circle at -8% 110%, color-mix(in srgb, var(--shape-b) 28%, transparent), transparent 36%),
+    radial-gradient(circle at 50% -22%, color-mix(in srgb, var(--shape-c) 16%, transparent), transparent 44%),
     var(--bg);
   min-height: 100vh;
   height: 100%;
@@ -146,18 +153,20 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: calc(1em + 1.2rem + 2px);
-  padding: 0 0.72rem;
-  border-radius: 16px;
-  border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface) 92%, var(--accent) 8%);
+  height: 3.05rem;
+  width: 3.05rem;
+  padding: 0;
+  border-radius: 0;
+  border: 0;
+  background: transparent;
   font-weight: 700;
   letter-spacing: 0.02em;
+  box-shadow: none;
 }
 
 .app-brand-icon {
-  width: 1.7rem;
-  height: 1.7rem;
+  width: 2.95rem;
+  height: 2.95rem;
   display: block;
 }
 
@@ -168,12 +177,16 @@ body {
 }
 
 .panel {
-  background: color-mix(in srgb, var(--surface) 92%, #f6f7f4 8%);
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--surface) 93%, var(--surface-soft) 7%),
+    color-mix(in srgb, var(--surface) 88%, var(--surface-contrast) 12%)
+  );
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 0.85rem 0.95rem;
   margin-top: 0.8rem;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.03);
+  box-shadow: var(--panel-shadow);
   animation: rise 0.25s ease-out;
 }
 
@@ -196,6 +209,21 @@ body {
   overflow-y: hidden;
 }
 
+.admin-subtabs-panel {
+  padding: 0.5rem 0.65rem;
+}
+
+.admin-subtabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  gap: 0.45rem;
+}
+
+.admin-subtabs button {
+  white-space: nowrap;
+}
+
 .settings-toggle-inline {
   flex: 0 0 auto;
 }
@@ -205,6 +233,27 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+}
+
+#projectsView,
+#roadmapView {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#projectsView.hidden-view,
+#roadmapView.hidden-view {
+  display: none;
+}
+
+#projectsView > .panel,
+#roadmapView > .panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 #heatmapView {
@@ -389,10 +438,30 @@ button {
   cursor: pointer;
   background: var(--button-bg);
   color: var(--text);
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.15s ease;
+}
+
+button:hover {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--line));
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+.theme-toggle-inline:focus-visible,
+.theme-toggle-floating:focus-visible,
+.settings-toggle-inline:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 button.primary {
-  background: var(--accent);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 92%, #fff), var(--accent));
+  border-color: color-mix(in srgb, var(--accent) 84%, #000);
   color: #fff;
 }
 
@@ -496,12 +565,26 @@ button.warn {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  font-size: 0.68rem;
+  width: 0.74rem;
+  height: 0.74rem;
   line-height: 1;
   color: var(--muted);
   opacity: 1;
   pointer-events: none;
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.col-resize-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.col-resize-icon path,
+.col-resize-icon line {
+  stroke: currentColor;
 }
 
 .resizable-head-cell:hover .col-resize-handle::before,
@@ -598,6 +681,40 @@ button.warn {
 #roadmapProjectsList .roadmap-role-trigger:focus-visible {
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+.role-tint-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.12rem 0.45rem;
+  border: 1px solid var(--role-tint-border, var(--line));
+  border-radius: 999px;
+  background: var(--role-tint-bg, color-mix(in srgb, var(--surface-soft) 65%, #000));
+  color: var(--role-tint-text, var(--text));
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+.role-tint-cell {
+  border: 1px solid var(--role-tint-border, var(--line));
+  border-radius: 8px;
+  background: var(--role-tint-bg, color-mix(in srgb, var(--surface-soft) 65%, #000));
+  color: var(--role-tint-text, var(--text));
+  padding: 0.12rem 0.45rem;
+}
+
+#roadmapProjectsList .roadmap-role-trigger.role-tint-cell {
+  border: 1px solid var(--role-tint-border, var(--line));
+  background: var(--role-tint-bg, color-mix(in srgb, var(--surface-soft) 85%, var(--surface)));
+  color: var(--role-tint-text, var(--text));
+  text-decoration: none;
+}
+
+#roadmapProjectsList .roadmap-role-trigger.role-tint-cell:hover,
+#roadmapProjectsList .roadmap-role-trigger.role-tint-cell:focus-visible {
+  filter: brightness(1.08);
+  text-decoration: none;
 }
 
 .roadmap-role-editor-panel {
@@ -746,7 +863,18 @@ button.warn {
 
 #overviewProjectsList,
 #roadmapProjectsList {
-  overflow-x: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+#overviewProjectsList .list-header,
+#roadmapProjectsList .list-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: color-mix(in srgb, var(--surface) 92%, var(--bg));
+  box-shadow: 0 1px 0 var(--line);
 }
 
 #overviewProjectsList .list-header,
@@ -785,6 +913,35 @@ button.warn {
 #closuresList .list-header,
 #closuresList .list-row {
   grid-template-columns: minmax(180px, 1.4fr) minmax(180px, 1fr) minmax(120px, 1fr) minmax(110px, 0.8fr);
+}
+
+#closuresList .list-row.editing {
+  grid-template-columns: 1fr;
+}
+
+.closure-inline-form {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(130px, 0.9fr) minmax(130px, 0.9fr) auto;
+  align-items: end;
+}
+
+.closure-inline-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.closure-inline-form input {
+  width: 100%;
+}
+
+.closure-inline-actions {
+  align-self: end;
 }
 
 #mappingsList .list-header,
@@ -1016,7 +1173,7 @@ button.warn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.9rem;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface-contrast) 76%, transparent);
 }
 
 .settings-toggle-inline {
@@ -1047,10 +1204,78 @@ button.warn {
   background: color-mix(in srgb, var(--surface) 90%, transparent);
 }
 
+.theme-toggle-floating {
+  position: fixed;
+  top: 0.9rem;
+  right: 0.9rem;
+  z-index: 4;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--text);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(6px);
+}
+
+.theme-toggle-floating:hover {
+  border-color: var(--accent);
+}
+
+.theme-toggle-icon {
+  width: 1rem;
+  height: 1rem;
+  display: block;
+  color: currentColor;
+}
+
+.theme-toggle-icon path,
+.theme-toggle-icon circle {
+  stroke: currentColor;
+}
+
+.theme-toggle-icon .theme-sun {
+  fill: color-mix(in srgb, var(--accent-2) 74%, #fff);
+  stroke: none;
+}
+
 .range-presets button {
   min-width: 4.5rem;
   padding: 0.35rem 0.55rem;
   border-radius: 999px;
+}
+
+select.personnel-project-filter {
+  height: 2rem;
+  padding: 0 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.82rem;
+  max-width: 200px;
+  cursor: pointer;
+}
+
+select.personnel-project-filter.is-role-tinted {
+  border-color: var(--role-tint-border, var(--border));
+  background: var(--role-tint-bg, var(--surface));
+  color: var(--role-tint-text, var(--text));
+  font-weight: 600;
+}
+
+select.personnel-project-filter option {
+  color: var(--text);
+  background: var(--surface);
+}
+
+select.personnel-project-filter:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .meta {
@@ -1136,6 +1361,44 @@ button.warn {
   position: relative;
 }
 
+.refresh-host {
+  position: relative;
+}
+
+.refresh-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.refresh-spinner {
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--muted) 35%, transparent);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+.refresh-label {
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 #projectUtilizationTimeline {
   flex: 1 1 auto;
   min-height: 0;
@@ -1179,8 +1442,11 @@ button.warn {
 .project-row-label {
   flex-direction: row;
   align-items: center;
+  justify-content: flex-start;
   gap: 0.4rem;
   white-space: nowrap;
+  width: 100%;
+  text-align: left;
 }
 
 .person-label {
@@ -1405,7 +1671,51 @@ button.warn {
 }
 
 .project-fixed-corner {
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+}
+
+.project-fixed-corner {
   z-index: 1;
+}
+
+.project-corner-label {
+  min-width: 0;
+  justify-self: start;
+  text-align: left;
+}
+
+.project-lead-resize-handle {
+  position: relative;
+  top: auto;
+  right: auto;
+  justify-self: end;
+  align-self: center;
+  width: 1.35rem;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: col-resize;
+}
+
+.project-lead-resize-handle::before {
+  display: none;
+}
+
+.project-lead-resize-handle .col-resize-icon {
+  color: var(--text);
+}
+
+.project-lead-resize-handle:hover,
+.project-lead-resize-handle:focus-visible {
+  border-color: var(--accent);
+}
+
+.project-lead-resize-handle:hover .col-resize-icon,
+.project-lead-resize-handle:focus-visible .col-resize-icon {
+  color: var(--accent);
 }
 
 .project-timeline-scroll-master {

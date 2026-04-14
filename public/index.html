@@ -18,7 +18,8 @@
         document.documentElement.dataset.theme = mode === 'system' ? systemTheme : mode;
       })();
     </script>
-    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="/favicon.ico" sizes="any" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -28,19 +29,17 @@
       <header class="hero">
         <div class="header-toolbar">
           <span class="app-name-pill" aria-label="Projection" title="Projection">
-            <img src="/favicon.ico" alt="Projection" class="app-brand-icon" />
+            <img src="/projection-logo-mark.svg" alt="Projection" class="app-brand-icon" />
           </span>
           <nav class="view-switcher panel compact-panel">
             <button id="showHeatmapView" class="primary">Project overview</button>
             <button id="showRoadmapView">Roadmap</button>
             <button id="showProjectsView">Projects</button>
             <button id="showPersonnelView">Personnel</button>
-            <button id="showUserManagementView" class="hidden-view">User Management</button>
             <button id="showPlanningView">Admin</button>
-            <button id="showMappingsView">Data Mapping</button>
           </nav>
           <button id="settingsToggle" class="settings-toggle-inline" type="button" aria-label="Open user settings" title="User settings">Settings</button>
-          <button id="themeToggle" class="theme-toggle-inline" type="button" aria-label="Toggle light and dark theme" title="Toggle theme">◐</button>
+          <button id="themeToggle" class="theme-toggle-inline" type="button" aria-label="Toggle light and dark theme" title="Toggle theme"><svg class="theme-toggle-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle class="theme-sun" cx="12" cy="12" r="4"></circle><path d="M12 2v3M12 19v3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M2 12h3M19 12h3M4.93 19.07l2.12-2.12M16.95 7.05l2.12-2.12" stroke-width="1.7" stroke-linecap="round"/></svg></button>
         </div>
         <div class="actions" id="accessRequestActions">
           <button id="requestDestroyerAccess" type="button" class="warn hidden-view">Request Destroyer Access</button>
@@ -78,6 +77,9 @@
                 <button type="button" data-project-filter="active" class="primary">Active</button>
                 <button type="button" data-project-filter="all">All</button>
               </div>
+              <select id="heatmapPersonnelFilter" class="personnel-project-filter">
+                <option value="">— None —</option>
+              </select>
               <div class="range-presets" id="projectHeatmapDensityPresets">
                 <button type="button" data-density="large">Large</button>
                 <button type="button" data-density="medium" class="primary">Medium</button>
@@ -95,6 +97,15 @@
         <section class="panel">
           <div class="panel-head">
             <h2>Roadmap</h2>
+            <div class="actions">
+              <div class="range-presets" id="roadmapOverviewStatusFilter">
+                <button type="button" data-project-filter="active" class="primary">Active</button>
+                <button type="button" data-project-filter="all">All</button>
+              </div>
+              <select id="roadmapPersonnelFilter" class="personnel-project-filter">
+                <option value="">— None —</option>
+              </select>
+            </div>
           </div>
           <div id="roadmapProjectsList" class="card-list"></div>
         </section>
@@ -105,6 +116,10 @@
           <div class="panel-head">
             <h2>Projects</h2>
             <div class="actions">
+              <div class="range-presets" id="projectsOverviewStatusFilter">
+                <button type="button" data-project-filter="active" class="primary">Active</button>
+                <button type="button" data-project-filter="all">All</button>
+              </div>
               <button id="addProjectRow" type="button">+ Add Project</button>
               <button id="loadProjectsOverview">Reload Projects</button>
             </div>
@@ -137,66 +152,89 @@
       </section>
 
       <section id="planningView" class="view-stack hidden-view">
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Templates</h2>
-          <div class="actions">
-            <button id="addTemplateRow" type="button">+ Add Template</button>
-            <button id="loadTemplates">Reload Templates</button>
+        <section class="panel compact-panel admin-subtabs-panel">
+          <nav class="view-switcher admin-subtabs" id="adminSubtabs">
+            <button type="button" data-admin-subtab="templates">Templates</button>
+            <button type="button" data-admin-subtab="closures">Global Closures</button>
+            <button type="button" data-admin-subtab="roles">Role Definitions</button>
+            <button type="button" data-admin-subtab="offices">Office Definitions</button>
+            <button type="button" data-admin-subtab="users">User Management</button>
+            <button type="button" data-admin-subtab="response-log">Response Log</button>
+            <button type="button" data-admin-subtab="mapping-list">Data Mapping List</button>
+            <button type="button" data-admin-subtab="mapping-editor">Data Mapping Editor</button>
+            <button type="button" data-admin-subtab="audit">Mutation Audit Log</button>
+          </nav>
+        </section>
+
+        <section class="panel" id="adminTemplatesSection" data-admin-subview="templates">
+          <div class="panel-head">
+            <h2>Templates</h2>
+            <div class="actions">
+              <button id="addTemplateRow" type="button">+ Add Template</button>
+              <button id="loadTemplates">Reload Templates</button>
+            </div>
           </div>
-        </div>
-        <div id="templatesList" class="card-list"></div>
-      </section>
+          <div id="templatesList" class="card-list"></div>
+        </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Global Closures</h2>
-          <div class="actions">
-            <button id="loadClosures">Reload Closures</button>
+        <section class="panel hidden-view" id="adminClosuresSection" data-admin-subview="closures">
+          <div class="panel-head">
+            <h2>Global Closures</h2>
+            <div class="actions">
+              <button id="loadClosures">Reload Closures</button>
+            </div>
           </div>
-        </div>
-        <div id="closuresList" class="card-list"></div>
-        <form id="createClosureForm" class="grid three">
-          <label>
-            Label
-            <input name="label" required />
-          </label>
-          <label>
-            Start Date
-            <input name="startDate" type="date" required />
-          </label>
-          <label>
-            End Date
-            <input name="endDate" type="date" required />
-          </label>
-          <button class="primary">Add Global Closure</button>
-        </form>
-      </section>
+          <div id="closuresList" class="card-list"></div>
+          <form id="createClosureForm" class="grid three">
+            <label>
+              Label
+              <input name="label" required />
+            </label>
+            <label>
+              Start Date
+              <input name="startDate" type="date" required />
+            </label>
+            <label>
+              End Date
+              <input name="endDate" type="date" required />
+            </label>
+            <button class="primary">Add Global Closure</button>
+          </form>
+        </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Role Definitions</h2>
-          <div class="actions"><button id="addRoleRow" type="button">+ Add Role</button></div>
-        </div>
-        <div id="rolesList" class="person-row-list"></div>
-      </section>
+        <section class="panel hidden-view" id="adminRolesSection" data-admin-subview="roles">
+          <div class="panel-head">
+            <h2>Role Definitions</h2>
+            <div class="actions"><button id="addRoleRow" type="button">+ Add Role</button></div>
+          </div>
+          <div id="rolesList" class="person-row-list"></div>
+        </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Office Definitions</h2>
-          <div class="actions"><button id="addOfficeRow" type="button">+ Add Office</button></div>
-        </div>
-        <div id="officesList" class="person-row-list"></div>
-      </section>
+        <section class="panel hidden-view" id="adminOfficesSection" data-admin-subview="offices">
+          <div class="panel-head">
+            <h2>Office Definitions</h2>
+            <div class="actions"><button id="addOfficeRow" type="button">+ Add Office</button></div>
+          </div>
+          <div id="officesList" class="person-row-list"></div>
+        </section>
 
-      <section class="panel">
-        <h2>Response Log</h2>
-        <pre id="responseLog" class="output"></pre>
-      </section>
-      </section>
+        <section class="panel hidden-view" id="adminUsersSection" data-admin-subview="users">
+          <div class="panel-head">
+            <h2>User Management</h2>
+            <div class="actions">
+              <button id="loadUsers">Reload Users</button>
+            </div>
+          </div>
+          <p class="meta">Admins can update nickname and access level for anyone who has logged in.</p>
+          <div id="usersList" class="card-list"></div>
+        </section>
 
-      <section id="mappingsView" class="view-stack hidden-view">
-        <section class="panel">
+        <section class="panel hidden-view" id="adminResponseLogSection" data-admin-subview="response-log">
+          <h2>Response Log</h2>
+          <pre id="responseLog" class="output"></pre>
+        </section>
+
+        <section class="panel hidden-view" id="adminMappingsSection" data-admin-subview="mapping-list">
           <div class="panel-head">
             <h2>Database Table Mappings</h2>
             <div class="actions">
@@ -207,7 +245,7 @@
           <div id="mappingsList" class="card-list"></div>
         </section>
 
-        <section class="panel">
+        <section class="panel hidden-view" id="adminMappingEditorSection" data-admin-subview="mapping-editor">
           <h2>Edit Mapping</h2>
           <form id="mappingForm" class="grid three">
             <input name="mappingId" type="hidden" />
@@ -248,21 +286,8 @@
             </div>
           </form>
         </section>
-      </section>
 
-      <section id="userManagementView" class="view-stack hidden-view">
-        <section class="panel">
-          <div class="panel-head">
-            <h2>User Management</h2>
-            <div class="actions">
-              <button id="loadUsers">Reload Users</button>
-            </div>
-          </div>
-          <p class="meta">Admins can update nickname and access level for anyone who has logged in.</p>
-          <div id="usersList" class="card-list"></div>
-        </section>
-
-        <section class="panel">
+        <section class="panel hidden-view" id="adminAuditSection" data-admin-subview="audit">
           <div class="panel-head">
             <h2>Mutation Audit Log</h2>
             <div class="actions">

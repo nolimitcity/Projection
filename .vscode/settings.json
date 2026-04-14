@@ -4,6 +4,7 @@
         "/^node --check \\.\\\\public\\\\app\\.js$/": {
             "approve": true,
             "matchCommandLine": true
-        }
+        },
+        "npx tsx": true
     }
 }

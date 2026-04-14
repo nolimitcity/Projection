@@ -1,0 +1,28 @@
+<svg width="1200" height="360" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Projection logo</title>
+  <desc id="desc">Projection logo with flash-centered prism mark and wordmark.</desc>
+
+  <defs>
+    <linearGradient id="a-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1D5D4F" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#F2A65A" stop-opacity="0.12"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(40 40)">
+    <circle cx="140" cy="140" r="132" fill="url(#a-bg)"/>
+    <path d="M140 58L228 110V218L140 270L52 218V110L140 58Z" fill="#FFFFFF" fill-opacity="0.92"/>
+    <path d="M140 58L228 110V218L140 270L52 218V110L140 58Z" stroke="#1D5D4F" stroke-width="4"/>
+    <path d="M140 94L195 126V191L140 223L85 191V126L140 94Z" fill="#D8E9E3"/>
+    <path d="M140 94L195 126L140 158L85 126L140 94Z" fill="#C4DED5"/>
+    <path d="M140 158L195 126V191L140 223V158Z" fill="#97C5B7"/>
+    <path d="M2450 3177 c34 -17 70 -74 70 -111 0 -24 -46 -105 -175 -314 -96 -156 -175 -291 -175 -301 0 -10 8 -28 18 -39 9 -11 152 -108 317 -216 186 -122 309 -208 323 -229 19 -26 23 -41 19 -79 -2 -26 -10 -55 -18 -65 -30 -36 -1134 -995 -1157 -1005 -9 -4 -36 -7 -60 -7 -61 -1 -112 46 -119 110 -5 45 -2 51 171 332 195 317 196 318 127 361 -137 87 -580 382 -598 398 -34 31 -46 79 -33 126 8 33 30 57 118 133 59 52 123 108 142 125 19 18 168 147 330 289 162 141 355 309 428 373 74 64 141 120 150 124 28 11 95 9 122 -5 z" fill="#F2A65A" transform="translate(78 224) scale(0.031 -0.031)"/>
+  </g>
+
+  <g transform="translate(352 92)">
+    <text x="0" y="112" font-family="'Space Grotesk', 'Segoe UI', sans-serif" font-size="108" font-weight="700" letter-spacing="3" fill="#15202B">PROJECTION</text>
+    <rect x="2" y="136" width="610" height="4" rx="2" fill="#1D5D4F"/>
+    <text x="2" y="186" font-family="'IBM Plex Mono', Consolas, monospace" font-size="28" font-weight="600" letter-spacing="2.2" fill="#1D5D4F">NOLIMIT CITY INTERNAL</text>
+    <circle cx="612" cy="151" r="10" fill="#F2A65A"/>
+  </g>
+</svg>

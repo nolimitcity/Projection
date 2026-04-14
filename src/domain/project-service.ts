@@ -8,6 +8,7 @@ import {
   DataMappingRuleInput,
   GlobalClosure,
   GlobalClosureCreateInput,
+  GlobalClosureUpdateInput,
   OfficeDefinition,
   Person,
   PersonCreateInput,
@@ -515,6 +516,29 @@ export class ProjectService {
     return created;
   }
 
+  updateGlobalClosure(actor: ActorContext, closureId: string, input: GlobalClosureUpdateInput): GlobalClosure {
+    assertClosureEditPermission(actor);
+    const closure = this.store.globalClosures.find((entry) => entry.id === closureId);
+    if (!closure) {
+      throw notFound("Global closure not found.", { closureId });
+    }
+
+    const nextLabel = input.label === undefined ? closure.label : input.label.trim();
+    if (!nextLabel) {
+      throw badRequest("Closure label is required.");
+    }
+
+    const nextStartDate = input.startDate ?? closure.startDate;
+    const nextEndDate = input.endDate ?? closure.endDate;
+    validateClosureDates(nextStartDate, nextEndDate);
+
+    closure.label = nextLabel;
+    closure.startDate = nextStartDate;
+    closure.endDate = nextEndDate;
+    this.store.save();
+    return closure;
+  }
+
   deleteGlobalClosure(actor: ActorContext, closureId: string): void {
     assertClosureEditPermission(actor);
     const index = this.store.globalClosures.findIndex((entry) => entry.id === closureId);
@@ -660,6 +684,7 @@ export class ProjectService {
       office: officeCode,
       weeklyCapacityHours: input.weeklyCapacityHours,
       workingDays: input.workingDays ?? [1, 2, 3, 4, 5],
+      isActive: input.isActive ?? true,
       createdAt: nowIso(),
       createdBy: actor.userId,
       updatedAt: nowIso()
@@ -701,6 +726,7 @@ export class ProjectService {
     person.office = officeCode;
     person.weeklyCapacityHours = input.weeklyCapacityHours;
     person.workingDays = input.workingDays ?? [1, 2, 3, 4, 5];
+    person.isActive = input.isActive ?? person.isActive;
     person.updatedAt = nowIso();
 
     this.store.save();
@@ -737,6 +763,9 @@ export class ProjectService {
     const person = this.store.people.find((entry) => entry.id === input.personId);
     if (!person) {
       throw notFound("Person not found.", { personId: input.personId });
+    }
+    if (!person.isActive) {
+      throw badRequest("Cannot assign inactive person.", { personId: input.personId });
     }
 
     const project = this.store.projects.find((entry) => entry.id === input.projectId);
@@ -794,6 +823,9 @@ export class ProjectService {
     if (!person) {
       throw notFound("Person not found.", { personId: input.personId });
     }
+    if (!person.isActive) {
+      throw badRequest("Cannot assign inactive person.", { personId: input.personId });
+    }
 
     const project = this.store.projects.find((entry) => entry.id === input.projectId);
     if (!project) {
@@ -842,56 +874,56 @@ export class ProjectService {
     }
 
     const people: PersonUtilization[] = this.store.people.map((person) => {
-      const plannedWorkingDays = person.workingDays.length;
-      let openWorkingDays = 0;
+        const plannedWorkingDays = person.workingDays.length;
+        let openWorkingDays = 0;
 
-      for (let i = 0; i < 7; i += 1) {
-        const date = addDays(parseIsoDate(window.weekStart), i);
-        const dateIso = formatIsoDate(date);
-        if (!person.workingDays.includes(dayNumber(date))) {
-          continue;
+        for (let i = 0; i < 7; i += 1) {
+          const date = addDays(parseIsoDate(window.weekStart), i);
+          const dateIso = formatIsoDate(date);
+          if (!person.workingDays.includes(dayNumber(date))) {
+            continue;
+          }
+          if (isDateInClosures(dateIso, closuresInWeek)) {
+            continue;
+          }
+          openWorkingDays += 1;
         }
-        if (isDateInClosures(dateIso, closuresInWeek)) {
-          continue;
-        }
-        openWorkingDays += 1;
-      }
 
-      const capacityFactor = plannedWorkingDays > 0 ? openWorkingDays / plannedWorkingDays : 0;
-      const availableHours = round1(person.weeklyCapacityHours * capacityFactor);
+        const capacityFactor = plannedWorkingDays > 0 ? openWorkingDays / plannedWorkingDays : 0;
+        const availableHours = round1(person.weeklyCapacityHours * capacityFactor);
 
-      const activeAssignments = this.store.assignments.filter(
-        (assignment) =>
-          assignment.personId === person.id &&
-          rangesOverlap(assignment.startDate, assignment.endDate, window.weekStart, window.weekEnd)
-      );
+        const activeAssignments = this.store.assignments.filter(
+          (assignment) =>
+            assignment.personId === person.id &&
+            rangesOverlap(assignment.startDate, assignment.endDate, window.weekStart, window.weekEnd)
+        );
 
-      const assignedHours = round1(
-        activeAssignments.reduce((sum, assignment) => sum + availableHours * (assignment.allocationPercent / 100), 0)
-      );
+        const assignedHours = round1(
+          activeAssignments.reduce((sum, assignment) => sum + availableHours * (assignment.allocationPercent / 100), 0)
+        );
 
-      const utilizationPercent = availableHours > 0 ? round1((assignedHours / availableHours) * 100) : 0;
+        const utilizationPercent = availableHours > 0 ? round1((assignedHours / availableHours) * 100) : 0;
 
-      return {
-        personId: person.id,
-        personName: person.name,
-        office: person.office,
-        availableHours,
-        assignedHours,
-        utilizationPercent,
-        overAllocated: utilizationPercent > 100,
-        assignments: activeAssignments.map((assignment) => {
-          const project = this.store.projects.find((entry) => entry.id === assignment.projectId);
-          return {
-            assignmentId: assignment.id,
-            projectId: assignment.projectId,
-            projectName: project?.name ?? "Unknown Project",
-            allocationPercent: assignment.allocationPercent,
-            roleCode: assignment.roleCode
-          };
-        })
-      };
-    });
+        return {
+          personId: person.id,
+          personName: person.name,
+          office: person.office,
+          availableHours,
+          assignedHours,
+          utilizationPercent,
+          overAllocated: utilizationPercent > 100,
+          assignments: activeAssignments.map((assignment) => {
+            const project = this.store.projects.find((entry) => entry.id === assignment.projectId);
+            return {
+              assignmentId: assignment.id,
+              projectId: assignment.projectId,
+              projectName: project?.name ?? "Unknown Project",
+              allocationPercent: assignment.allocationPercent,
+              roleCode: assignment.roleCode
+            };
+          })
+        };
+      });
 
     return {
       weekStart: window.weekStart,

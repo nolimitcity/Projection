@@ -94,6 +94,7 @@ const importPeople = (rows: SheetRows, importedAt: string): { people: Person[]; 
       office,
       weeklyCapacityHours: 40,
       workingDays: [1, 2, 3, 4, 5],
+      isActive: true,
       createdAt: importedAt,
       createdBy: "xlsx-import",
       updatedAt: importedAt
@@ -194,6 +195,7 @@ const importRoadmap = (
       office: "Unknown",
       weeklyCapacityHours: 40,
       workingDays: [1, 2, 3, 4, 5],
+      isActive: true,
       createdAt: importedAt,
       createdBy: "xlsx-import",
       updatedAt: importedAt

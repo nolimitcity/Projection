@@ -175,6 +175,12 @@ export interface GlobalClosureCreateInput {
   endDate: string;
 }
 
+export interface GlobalClosureUpdateInput {
+  label?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
 export interface Person {
   id: string;
   name: string;
@@ -182,6 +188,7 @@ export interface Person {
   office: string;
   weeklyCapacityHours: number;
   workingDays: number[];
+  isActive: boolean;
   createdAt: string;
   createdBy: string;
   updatedAt: string;
@@ -193,6 +200,7 @@ export interface PersonCreateInput {
   office: string;
   weeklyCapacityHours: number;
   workingDays?: number[];
+  isActive?: boolean;
   expectedUpdatedAt?: string;
 }
 

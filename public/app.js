@@ -13,16 +13,13 @@ const el = {
   showProjectsView: document.querySelector('#showProjectsView'),
   showPersonnelView: document.querySelector('#showPersonnelView'),
   showPlanningView: document.querySelector('#showPlanningView'),
-  showMappingsView: document.querySelector('#showMappingsView'),
-  showUserManagementView: document.querySelector('#showUserManagementView'),
+  adminSubtabs: document.querySelector('#adminSubtabs'),
   requestDestroyerAccess: document.querySelector('#requestDestroyerAccess'),
   heatmapView: document.querySelector('#heatmapView'),
   roadmapView: document.querySelector('#roadmapView'),
   projectsView: document.querySelector('#projectsView'),
   personnelView: document.querySelector('#personnelView'),
   planningView: document.querySelector('#planningView'),
-  mappingsView: document.querySelector('#mappingsView'),
-  userManagementView: document.querySelector('#userManagementView'),
   roadmapProjectsList: document.querySelector('#roadmapProjectsList'),
   loadProjectsOverview: document.querySelector('#loadProjectsOverview'),
   addTemplateRow: document.querySelector('#addTemplateRow'),
@@ -36,7 +33,11 @@ const el = {
   projectHeatmapDensityPresets: document.querySelector('#projectHeatmapDensityPresets'),
   personnelHeatmapDensityPresets: document.querySelector('#personnelHeatmapDensityPresets'),
   projectOverviewStatusFilter: document.querySelector('#projectOverviewStatusFilter'),
+  projectsOverviewStatusFilter: document.querySelector('#projectsOverviewStatusFilter'),
+  roadmapOverviewStatusFilter: document.querySelector('#roadmapOverviewStatusFilter'),
   personnelOverviewStatusFilter: document.querySelector('#personnelOverviewStatusFilter'),
+  heatmapPersonnelFilter: document.querySelector('#heatmapPersonnelFilter'),
+  roadmapPersonnelFilter: document.querySelector('#roadmapPersonnelFilter'),
   utilizationSummary: document.querySelector('#utilizationSummary'),
   utilizationTimeline: document.querySelector('#utilizationTimeline'),
   projectTimelineSummary: document.querySelector('#projectTimelineSummary'),
@@ -84,7 +85,9 @@ const state = {
   utilizationTimeline: null,
   projectUtilizationTimeline: null,
   globalClosures: [],
+  editingClosureId: null,
   activeView: 'heatmap',
+  activeAdminSubView: 'templates',
   editingTemplateId: null,
   creatingTemplateRow: false,
   editingProjectId: null,
@@ -98,11 +101,15 @@ const state = {
   projectHeatmapDensity: 'medium',
   personnelHeatmapDensity: 'medium',
   projectOverviewFilter: 'active',
+  personnelProjectFilter: '',
+  overviewAnalyticsDirty: false,
   currentUser: null,
   users: [],
   auditEvents: [],
   liveEditing: []
 };
+
+let overviewAnalyticsPromise = null;
 
 const LIVE_EDIT_HEARTBEAT_MS = 5000;
 const LIVE_EDIT_FALLBACK_POLL_MS = 8000;
@@ -118,7 +125,11 @@ const HEATMAP_DENSITY_KEY = 'projection_project_heatmap_density';
 const PERSONNEL_DENSITY_KEY = 'projection_personnel_heatmap_density';
 const PROJECT_LIST_COLUMNS_KEY = 'projection_projects_list_columns';
 const ROADMAP_LIST_COLUMNS_KEY = 'projection_roadmap_list_columns';
+const PROJECT_TIMELINE_LEAD_WIDTH_KEY = 'projection_project_timeline_lead_width';
 const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+
+const THEME_TOGGLE_ICON = '<svg class="theme-toggle-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle class="theme-sun" cx="12" cy="12" r="4"></circle><path d="M12 2v3M12 19v3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M2 12h3M19 12h3M4.93 19.07l2.12-2.12M16.95 7.05l2.12-2.12" stroke-width="1.7" stroke-linecap="round"/></svg>';
+const RESIZE_HANDLE_ICON = '<span class="col-resize-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><line x1="9" y1="5" x2="9" y2="19" stroke-width="1.8" stroke-linecap="round"></line><line x1="15" y1="5" x2="15" y2="19" stroke-width="1.8" stroke-linecap="round"></line><path d="M5 12h4" stroke-width="1.8" stroke-linecap="round"></path><path d="M15 12h4" stroke-width="1.8" stroke-linecap="round"></path></svg></span>';
 
 const HEATMAP_DENSITY_WIDTH = {
   large: 72,
@@ -127,6 +138,103 @@ const HEATMAP_DENSITY_WIDTH = {
 };
 
 const APP_VIEWS = new Set(['heatmap', 'roadmap', 'projects', 'personnel', 'planning', 'mappings', 'users']);
+const ADMIN_SUB_VIEWS = new Set([
+  'templates',
+  'closures',
+  'roles',
+  'offices',
+  'response-log',
+  'mapping-list',
+  'mapping-editor',
+  'users',
+  'audit'
+]);
+
+const ROLE_TINT_PRESETS = {
+  PROD: { bg: '#7a2d0c', border: '#f18a2a', text: '#fff5eb' },
+  FE: { bg: '#0e5b38', border: '#2bd17f', text: '#edfff5' },
+  GFX: { bg: '#7a144f', border: '#ff5eb7', text: '#ffeef8' },
+  ANIM: { bg: '#6e4a00', border: '#f4b729', text: '#fff8e8' },
+  SND: { bg: '#0f4f86', border: '#3ca5ff', text: '#eef7ff' },
+  SRV: { bg: '#2e1c7a', border: '#8b78ff', text: '#f3f0ff' },
+  QA: { bg: '#5c1c7e', border: '#cd6bff', text: '#f9efff' },
+  AQA: { bg: '#0f615b', border: '#33d2c4', text: '#ecfffd' },
+  CERT: { bg: '#7a4705', border: '#ffab3f', text: '#fff4e7' }
+};
+
+const ROLE_TINT_FALLBACKS = [
+  { bg: '#6f1324', border: '#ef5c7a', text: '#ffeef1' },
+  { bg: '#125f46', border: '#39d393', text: '#ecfff6' },
+  { bg: '#173f7b', border: '#58a0ff', text: '#edf4ff' },
+  { bg: '#6f4a06', border: '#f0af34', text: '#fff6e8' },
+  { bg: '#3f2478', border: '#9d84ff', text: '#f2edff' },
+  { bg: '#115c62', border: '#42cad4', text: '#ebfeff' },
+  { bg: '#6d1e62', border: '#d56bc7', text: '#ffeeff' },
+  { bg: '#3f3f3f', border: '#9d9d9d', text: '#f5f5f5' }
+];
+
+const hashRoleCode = (roleCode) => {
+  const source = String(roleCode || 'UNKNOWN').toUpperCase();
+  let hash = 0;
+  for (let i = 0; i < source.length; i += 1) {
+    hash = ((hash << 5) - hash) + source.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+};
+
+const roleTintTokens = (roleCode) => {
+  const normalized = String(roleCode || '').trim().toUpperCase();
+  if (!normalized) {
+    return { bg: '#3f3f3f', border: '#9d9d9d', text: '#f5f5f5' };
+  }
+
+  if (ROLE_TINT_PRESETS[normalized]) {
+    return ROLE_TINT_PRESETS[normalized];
+  }
+
+  return ROLE_TINT_FALLBACKS[hashRoleCode(normalized) % ROLE_TINT_FALLBACKS.length];
+};
+
+const roleTintStyleAttr = (roleCode) => {
+  const tint = roleTintTokens(roleCode);
+  return `style="--role-tint-bg:${tint.bg};--role-tint-border:${tint.border};--role-tint-text:${tint.text};"`;
+};
+
+const roleTintInlineStyle = (roleCode) => {
+  const tint = roleTintTokens(roleCode);
+  return `background-color:${tint.bg};border-color:${tint.border};color:${tint.text};`;
+};
+
+const beginRefreshOverlay = (hostElement) => {
+  if (!(hostElement instanceof HTMLElement)) {
+    return () => undefined;
+  }
+
+  const currentCount = Number(hostElement.dataset.refreshCount || '0');
+  const nextCount = currentCount + 1;
+  hostElement.dataset.refreshCount = String(nextCount);
+  hostElement.classList.add('refresh-host', 'is-refreshing');
+
+  if (!hostElement.querySelector('.refresh-overlay')) {
+    const overlay = document.createElement('div');
+    overlay.className = 'refresh-overlay';
+    overlay.innerHTML = '<span class="refresh-spinner" aria-hidden="true"></span><span class="refresh-label">Refreshing...</span>';
+    hostElement.appendChild(overlay);
+  }
+
+  return () => {
+    const count = Math.max(0, Number(hostElement.dataset.refreshCount || '1') - 1);
+    hostElement.dataset.refreshCount = String(count);
+    if (count === 0) {
+      hostElement.classList.remove('is-refreshing');
+      const overlay = hostElement.querySelector('.refresh-overlay');
+      overlay?.remove();
+    }
+  };
+};
+
+const viewNeedsOverviewAnalytics = () => state.activeView === 'heatmap' || state.activeView === 'personnel';
 
 const parseStoredColumnWidths = (storageKey) => {
   try {
@@ -147,6 +255,8 @@ const clampColumnWidth = (value, min = 10, max = 760) => {
   }
   return Math.min(max, Math.max(min, Math.round(numeric)));
 };
+
+state.projectTimelineLeadWidth = clampColumnWidth(Number(localStorage.getItem(PROJECT_TIMELINE_LEAD_WIDTH_KEY) || '192'), 120, 420);
 
 const resolveColumnWidth = (widthMap, key, fallback, minWidth = 10) =>
   clampColumnWidth(widthMap?.[key] ?? fallback, minWidth);
@@ -171,7 +281,7 @@ const buildResizableListHeader = (listType, columns, widthMap, extraClass = '') 
           data-col-key="${column.key}"
           aria-label="Resize ${escapeHtml(column.label)} column"
           title="Drag to resize column"
-        ><span class="col-resize-icon" aria-hidden="true">↔</span></button>
+        >${RESIZE_HANDLE_ICON}</button>
       </span>
     `)
     .join('');
@@ -208,6 +318,25 @@ const startColumnResize = (listType, columnKey, startX, startWidth) => {
   window.addEventListener('pointerup', onPointerUp);
 };
 
+const startProjectTimelineLeadResize = (startX, startWidth) => {
+  const onPointerMove = (moveEvent) => {
+    const delta = moveEvent.clientX - startX;
+    state.projectTimelineLeadWidth = clampColumnWidth(startWidth + delta, 120, 420);
+    localStorage.setItem(PROJECT_TIMELINE_LEAD_WIDTH_KEY, String(state.projectTimelineLeadWidth));
+    renderProjectUtilizationTimeline({ preservePosition: true });
+  };
+
+  const onPointerUp = () => {
+    document.body.style.userSelect = '';
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', onPointerUp);
+  };
+
+  document.body.style.userSelect = 'none';
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+};
+
 const normalizeThemeMode = (value) => (value === 'light' || value === 'dark' || value === 'system' ? value : 'system');
 const resolvedTheme = (mode) => (mode === 'system' ? (darkModeQuery.matches ? 'dark' : 'light') : mode);
 
@@ -219,7 +348,7 @@ const refreshThemeToggle = () => {
   const mode = normalizeThemeMode(localStorage.getItem(THEME_MODE_KEY));
   const activeTheme = document.documentElement.dataset.theme || resolvedTheme(mode);
   el.themeToggle.dataset.theme = activeTheme;
-  el.themeToggle.textContent = '◐';
+  el.themeToggle.innerHTML = THEME_TOGGLE_ICON;
   el.themeToggle.setAttribute('aria-label', activeTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
   el.themeToggle.title = activeTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
 };
@@ -333,27 +462,91 @@ const syncRoleEchoFields = () => {
   el.userRole.disabled = true;
 };
 
-const syncMappingTabVisibility = () => {
-  const allowed = hasMappingAccess();
-  el.showMappingsView.classList.toggle('hidden-view', !allowed);
-  if (!allowed && state.activeView === 'mappings') {
-    setActiveView('heatmap', { updateHistory: true, replaceHistory: true });
+const normalizeAdminSubViewName = (value) => (ADMIN_SUB_VIEWS.has(value) ? value : 'templates');
+
+const isAdminSubViewAllowed = (subViewName) => {
+  const subView = normalizeAdminSubViewName(subViewName);
+  if (subView === 'mapping-list' || subView === 'mapping-editor') {
+    return hasMappingAccess();
   }
+  if (subView === 'users' || subView === 'audit') {
+    return hasUserManagementAccess();
+  }
+  return canEditData();
 };
 
-const syncUserManagementTabVisibility = () => {
-  const allowed = hasUserManagementAccess();
-  el.showUserManagementView.classList.toggle('hidden-view', !allowed);
-  if (!allowed && state.activeView === 'users') {
-    setActiveView('heatmap', { updateHistory: true, replaceHistory: true });
+const resolveDefaultAdminSubView = () => {
+  const orderedSubViews = ['templates', 'closures', 'roles', 'offices', 'response-log', 'mapping-list', 'mapping-editor', 'users', 'audit'];
+  return orderedSubViews.find((subView) => isAdminSubViewAllowed(subView)) || null;
+};
+
+const setActiveAdminSubView = (subViewName, options = {}) => {
+  const requestedSubView = normalizeAdminSubViewName(subViewName);
+  const fallbackSubView = resolveDefaultAdminSubView();
+  const nextSubView = isAdminSubViewAllowed(requestedSubView) ? requestedSubView : fallbackSubView;
+  if (!nextSubView) {
+    state.activeAdminSubView = 'templates';
+    return;
+  }
+
+  state.activeAdminSubView = nextSubView;
+
+  const subTabButtons = el.adminSubtabs?.querySelectorAll('button[data-admin-subtab]') || [];
+  subTabButtons.forEach((button) => {
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+    const buttonSubView = normalizeAdminSubViewName(button.dataset.adminSubtab || '');
+    const allowed = isAdminSubViewAllowed(buttonSubView);
+    button.classList.toggle('hidden-view', !allowed);
+    button.classList.toggle('primary', allowed && buttonSubView === nextSubView);
+  });
+
+  const subViewPanels = document.querySelectorAll('[data-admin-subview]');
+  subViewPanels.forEach((panel) => {
+    if (!(panel instanceof HTMLElement)) {
+      return;
+    }
+    const panelSubView = normalizeAdminSubViewName(panel.dataset.adminSubview || '');
+    panel.classList.toggle('hidden-view', panelSubView !== nextSubView);
+  });
+
+  if (nextSubView === 'mapping-list' || nextSubView === 'mapping-editor') {
+    Promise.all([loadMappingTables(), loadMappings()])
+      .then(() => {
+        resetMappingEditor();
+      })
+      .catch((error) => {
+        log('Load mappings failed', error);
+      });
+  }
+
+  if (nextSubView === 'users') {
+    loadUsers().catch((error) => {
+      log('Load users failed', error);
+    });
+  }
+
+  if (nextSubView === 'audit') {
+    loadAuditLog().catch((error) => {
+      log('Load audit log failed', error);
+    });
+  }
+
+  if (options.updateHistory && state.activeView === 'planning') {
+    writeViewToHistory('planning', Boolean(options.replaceHistory));
   }
 };
 
 const syncPlanningVisibility = () => {
-  const allowed = canEditData();
+  const allowed = canEditData() || hasMappingAccess() || hasUserManagementAccess();
   el.showPlanningView.classList.toggle('hidden-view', !allowed);
-  if (!allowed && state.activeView === 'planning') {
+  if (!allowed && (state.activeView === 'planning' || state.activeView === 'mappings' || state.activeView === 'users')) {
     setActiveView('heatmap', { updateHistory: true, replaceHistory: true });
+    return;
+  }
+  if (allowed) {
+    setActiveAdminSubView(state.activeAdminSubView);
   }
 };
 
@@ -1331,6 +1524,45 @@ const updateProjectFormMilestonePreviews = (form, changedField = 'releaseDate') 
   certPreviewInput.value = certificationDateFromInputs(releaseInput.value, exclusiveInput.value, certLeadInput.value);
 };
 
+const matchesPersonnelFilter = (project) => {
+  if (!state.personnelProjectFilter) {
+    return true;
+  }
+  return state.assignments.some((a) => a.personId === state.personnelProjectFilter && a.projectId === project.id);
+};
+
+const populatePersonnelProjectFilters = () => {
+  const selects = [el.heatmapPersonnelFilter, el.roadmapPersonnelFilter].filter(Boolean);
+  if (!selects.length) {
+    return;
+  }
+
+  const noneOption = '<option value="">\u2014 None \u2014</option>';
+  const groups = state.roles
+    .filter((role) => activePeople().some((p) => p.primaryRoleCode === role.code))
+    .map((role) => {
+      const people = activePeople()
+        .filter((p) => p.primaryRoleCode === role.code)
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name));
+      const options = people
+        .map((p) => `<option value="${escapeHtml(p.id)}" data-role-code="${escapeHtml(role.code)}" style="${roleTintInlineStyle(role.code)}">${escapeHtml(p.name)}</option>`)
+        .join('');
+      return `<optgroup label="${escapeHtml(role.label)}">${options}</optgroup>`;
+    });
+
+  const html = noneOption + groups.join('');
+  const currentValue = state.personnelProjectFilter;
+  selects.forEach((select) => {
+    select.innerHTML = html;
+    select.value = currentValue;
+    const selected = select.selectedOptions?.[0];
+    const roleCode = selected?.dataset.roleCode || '';
+    select.classList.toggle('is-role-tinted', Boolean(roleCode));
+    select.style.cssText = roleCode ? roleTintInlineStyle(roleCode) : '';
+  });
+};
+
 const renderProjects = () => {
   const projectColumns = [
     { key: 'name', label: 'Name', defaultWidth: 220, minWidth: 10 },
@@ -1343,8 +1575,12 @@ const renderProjects = () => {
     { key: 'actions', label: 'Actions', defaultWidth: 128, minWidth: 10 }
   ];
   const projectsHeader = buildResizableListHeader('projects', projectColumns, state.projectsColumnWidths, 'projects-list-header');
+  const visibleProjects = state.projects.filter((project) =>
+    (state.projectOverviewFilter === 'all' ? true : project.status === 'active') &&
+    matchesPersonnelFilter(project)
+  );
 
-  if (!state.projects.length) {
+  if (!visibleProjects.length && !state.creatingProjectRow) {
     el.overviewProjectsList.innerHTML = `${projectsHeader.html}<p>No projects available.</p>`;
     applyLiveEditHighlights();
     return;
@@ -1357,7 +1593,7 @@ const renderProjects = () => {
   el.overviewProjectsList.innerHTML =
     projectsHeader.html +
     createRowHtml +
-    state.projects
+    visibleProjects
     .map(
       (project) => {
         const milestones = projectMilestones(project);
@@ -1470,8 +1706,9 @@ const closeRoadmapRoleEditor = () => {
 };
 
 const defaultRoadmapPersonIdForRole = (roleCode) => {
-  const preferred = state.people.find((person) => person.primaryRoleCode === roleCode)?.id;
-  return preferred || state.people[0]?.id || '';
+  const candidates = activePeople();
+  const preferred = candidates.find((person) => person.primaryRoleCode === roleCode)?.id;
+  return preferred || candidates[0]?.id || '';
 };
 
 const renderRoadmapRoleAssignmentPanel = (projectId, roleCode) => {
@@ -1481,15 +1718,11 @@ const renderRoadmapRoleAssignmentPanel = (projectId, roleCode) => {
     .sort((a, b) => a.startDate.localeCompare(b.startDate));
   const defaults = getProjectAssignmentDefaultRange(projectId);
   const defaultPersonId = defaultRoadmapPersonIdForRole(roleCode);
-  const personOptions = state.people
-    .map((person) => `<option value="${escapeHtml(person.id)}" ${person.id === defaultPersonId ? 'selected' : ''}>${escapeHtml(person.name)}</option>`)
-    .join('');
+  const personOptions = personOptionsForPicker(defaultPersonId);
 
   const existingForms = existing
     .map((assignment) => {
-      const rowPersonOptions = state.people
-        .map((person) => `<option value="${escapeHtml(person.id)}" ${person.id === assignment.personId ? 'selected' : ''}>${escapeHtml(person.name)}</option>`)
-        .join('');
+      const rowPersonOptions = personOptionsForPicker(assignment.personId);
       return `
         <form class="roadmap-assignment-form roadmap-assignment-existing" data-project-id="${projectId}" data-role-code="${roleCode}" data-assignment-id="${assignment.id}">
           <input name="expectedUpdatedAt" type="hidden" value="${escapeHtml(assignment.updatedAt || '')}" />
@@ -1580,12 +1813,24 @@ const renderRoadmapProjects = () => {
     return;
   }
 
-  const ordered = [...state.projects]
+  const ordered = state.projects
+    .filter((project) =>
+      (state.projectOverviewFilter === 'all' ? true : project.status === 'active') &&
+      matchesPersonnelFilter(project)
+    )
+    .slice()
     .sort((a, b) => {
       const left = projectMilestones(a).releaseDate || '';
       const right = projectMilestones(b).releaseDate || '';
       return left.localeCompare(right);
     });
+
+  if (!ordered.length) {
+    const roadmapHeader = buildResizableListHeader('roadmap', baseRoadmapColumns, state.roadmapColumnWidths, 'roadmap-list-header');
+    el.roadmapProjectsList.innerHTML = `${roadmapHeader.html}<p>No projects available for this filter.</p>`;
+    applyLiveEditHighlights();
+    return;
+  }
 
   const roleColumns = roadmapRoleColumns(ordered);
   const roadmapColumns = [
@@ -1620,7 +1865,7 @@ const renderRoadmapProjects = () => {
 
         const milestones = projectMilestones(project);
         const roleCells = roleColumns
-          .map((role) => `<button type="button" class="list-cell roadmap-role-cell roadmap-role-trigger" data-action="open-roadmap-role-editor" data-id="${project.id}" data-role-code="${role.code}" title="Edit personnel in ${escapeHtml(role.label)}">${escapeHtml(roadmapRoleNamesForProject(project.id, role.code) || '-')}</button>`)
+          .map((role) => `<button type="button" class="list-cell roadmap-role-cell roadmap-role-trigger role-tint-cell" ${roleTintStyleAttr(role.code)} data-action="open-roadmap-role-editor" data-id="${project.id}" data-role-code="${role.code}" title="Edit personnel in ${escapeHtml(role.label)}">${escapeHtml(roadmapRoleNamesForProject(project.id, role.code) || '-')}</button>`)
           .join('');
         const roleEditorPanel = state.roadmapRoleEditor && state.roadmapRoleEditor.projectId === project.id
           ? `
@@ -1723,7 +1968,7 @@ const syncPersonnelDensityButtons = () => {
 };
 
 const syncProjectOverviewFilterButtons = () => {
-  [el.projectOverviewStatusFilter, el.personnelOverviewStatusFilter].forEach((filterRoot) => {
+  [el.projectOverviewStatusFilter, el.projectsOverviewStatusFilter, el.roadmapOverviewStatusFilter, el.personnelOverviewStatusFilter].forEach((filterRoot) => {
     const filterButtons = filterRoot?.querySelectorAll('button[data-project-filter]') || [];
     filterButtons.forEach((button) => {
       if (!(button instanceof HTMLButtonElement)) {
@@ -1751,7 +1996,8 @@ const countWeeksInclusive = (startIso, endIso) => {
 
 const getVisibleProjectTimelineRange = () => {
   const visibleProjects = state.projects.filter((project) =>
-    state.projectOverviewFilter === 'all' ? true : project.status === 'active'
+    (state.projectOverviewFilter === 'all' ? true : project.status === 'active') &&
+    matchesPersonnelFilter(project)
   );
   if (!visibleProjects.length) {
     const todayIso = new Date().toISOString().slice(0, 10);
@@ -1809,16 +2055,38 @@ const setPersonnelDensity = (density) => {
 const setProjectOverviewFilter = async (filter) => {
   state.projectOverviewFilter = normalizeProjectOverviewFilter(filter);
   syncProjectOverviewFilterButtons();
+  renderProjects();
+  renderRoadmapProjects();
+
+  state.overviewAnalyticsDirty = true;
+  if (!viewNeedsOverviewAnalytics()) {
+    return;
+  }
+
   await refreshOverviewAnalytics();
+  state.overviewAnalyticsDirty = false;
 };
 
 const refreshOverviewAnalytics = async () => {
+  if (overviewAnalyticsPromise) {
+    return overviewAnalyticsPromise;
+  }
+
   const range = getVisibleProjectTimelineRange();
-  await Promise.all([
+  const stopUtilizationTimelineOverlay = beginRefreshOverlay(el.utilizationTimeline);
+  const stopProjectTimelineOverlay = beginRefreshOverlay(el.projectUtilizationTimeline);
+
+  overviewAnalyticsPromise = Promise.all([
     loadUtilization(range.weekStart),
     loadUtilizationTimeline(range.weekStart, range.weeks),
     loadProjectUtilizationTimeline(range.weekStart, range.weeks)
-  ]);
+  ]).finally(() => {
+    stopUtilizationTimelineOverlay();
+    stopProjectTimelineOverlay();
+    overviewAnalyticsPromise = null;
+  });
+
+  await overviewAnalyticsPromise;
 };
 
 const openProjectEditor = (projectId) => {
@@ -1881,6 +2149,25 @@ const personRoleOptions = (selectedCode) =>
 const personOfficeOptions = (selectedCode) =>
   state.offices.map((o) => `<option value="${escapeHtml(o.code)}" ${o.code === selectedCode ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
 
+const activePeople = () => state.people;
+
+const personDisplayName = (person) => {
+  if (!person) {
+    return 'Unknown Person';
+  }
+  return person.isActive === false ? `${person.name} (inactive)` : person.name;
+};
+
+const personOptionsForPicker = (selectedId = '') => {
+  const options = state.people
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return options
+    .map((person) => `<option value="${escapeHtml(person.id)}" ${person.id === selectedId ? 'selected' : ''}>${escapeHtml(personDisplayName(person))}</option>`)
+    .join('');
+};
+
 const personEditFormHtml = (person) => `
   <form class="person-edit-form" data-id="${person.id}" data-edit-key="${buildEditKey('person', person.id)}">
     <input name="personId" type="hidden" value="${person.id}" />
@@ -1905,6 +2192,13 @@ const personEditFormHtml = (person) => `
       <label class="person-edit-field">
         <span>Days</span>
         <input name="workingDays" class="person-row-input" value="${person.workingDays.join(',')}" required />
+      </label>
+      <label class="person-edit-field">
+        <span>Status</span>
+        <select name="isActive" class="person-row-input" required>
+          <option value="true" ${person.isActive !== false ? 'selected' : ''}>Active</option>
+          <option value="false" ${person.isActive === false ? 'selected' : ''}>Inactive</option>
+        </select>
       </label>
     </div>
     <div class="person-edit-actions">
@@ -1937,6 +2231,13 @@ const personRowNewHtml = () => `
       <label class="person-edit-field">
         <span>Days</span>
         <input name="workingDays" class="person-row-input" placeholder="1,2,3,4,5" value="1,2,3,4,5" required />
+      </label>
+      <label class="person-edit-field">
+        <span>Status</span>
+        <select name="isActive" class="person-row-input" required>
+          <option value="true" selected>Active</option>
+          <option value="false">Inactive</option>
+        </select>
       </label>
     </div>
     <div class="person-edit-actions">
@@ -2133,74 +2434,104 @@ const resetMappingEditor = () => {
 
 const setActiveView = (viewName, options = {}) => {
   const requestedView = normalizeViewName(viewName);
-  const mappingDenied = requestedView === 'mappings' && !hasMappingAccess();
-  const usersDenied = requestedView === 'users' && !hasUserManagementAccess();
-  const planningDenied = requestedView === 'planning' && !canEditData();
-  const nextView = mappingDenied || usersDenied || planningDenied ? 'heatmap' : requestedView;
+  const requestedAdminSubView = requestedView === 'mappings'
+    ? 'mapping-list'
+    : requestedView === 'users'
+      ? 'users'
+      : null;
+  const planningRequested = requestedView === 'planning' || Boolean(requestedAdminSubView);
+  const planningDenied = planningRequested && !(canEditData() || hasMappingAccess() || hasUserManagementAccess());
+  const nextView = planningDenied ? 'heatmap' : planningRequested ? 'planning' : requestedView;
   state.activeView = nextView;
   const heatmapVisible = nextView === 'heatmap';
   const roadmapVisible = nextView === 'roadmap';
   const projectsVisible = nextView === 'projects';
   const personnelVisible = nextView === 'personnel';
   const planningVisible = nextView === 'planning';
-  const mappingsVisible = nextView === 'mappings';
-  const usersVisible = nextView === 'users';
   el.heatmapView.classList.toggle('hidden-view', !heatmapVisible);
   el.roadmapView.classList.toggle('hidden-view', !roadmapVisible);
   el.projectsView.classList.toggle('hidden-view', !projectsVisible);
   el.personnelView.classList.toggle('hidden-view', !personnelVisible);
   el.planningView.classList.toggle('hidden-view', !planningVisible);
-  el.mappingsView.classList.toggle('hidden-view', !mappingsVisible);
-  el.userManagementView.classList.toggle('hidden-view', !usersVisible);
   el.showHeatmapView.classList.toggle('primary', heatmapVisible);
   el.showRoadmapView.classList.toggle('primary', roadmapVisible);
   el.showProjectsView.classList.toggle('primary', projectsVisible);
   el.showPersonnelView.classList.toggle('primary', personnelVisible);
   el.showPlanningView.classList.toggle('primary', planningVisible);
-  el.showMappingsView.classList.toggle('primary', mappingsVisible);
-  el.showUserManagementView.classList.toggle('primary', usersVisible);
+
+  if (planningVisible) {
+    setActiveAdminSubView(requestedAdminSubView || state.activeAdminSubView || 'templates');
+  }
 
   if (options.updateHistory) {
     writeViewToHistory(nextView, Boolean(options.replaceHistory));
   }
 
-  if (mappingsVisible) {
-    Promise.all([loadMappingTables(), loadMappings()])
+  if ((heatmapVisible || personnelVisible) && state.overviewAnalyticsDirty) {
+    refreshOverviewAnalytics()
       .then(() => {
-        resetMappingEditor();
+        state.overviewAnalyticsDirty = false;
       })
       .catch((error) => {
-        log('Load mappings failed', error);
+        log('Refresh overview analytics failed', error);
       });
-  }
-
-  if (usersVisible) {
-    Promise.all([loadUsers(), loadAuditLog()]).catch((error) => {
-      log('Load users failed', error);
-    });
   }
 };
 
 const renderClosures = () => {
   if (!state.globalClosures.length) {
+    state.editingClosureId = null;
     el.closuresList.innerHTML = `${listHeaderHtml(['Label', 'Date Range', 'Created By', 'Actions'])}<p>No global closures configured.</p>`;
     return;
+  }
+
+  if (!state.globalClosures.some((closure) => closure.id === state.editingClosureId)) {
+    state.editingClosureId = null;
   }
 
   el.closuresList.innerHTML =
     listHeaderHtml(['Label', 'Date Range', 'Created By', 'Actions']) +
     state.globalClosures
     .map(
-      (closure) => `
-        <div class="list-row list-row-closure">
-          <span class="list-cell list-cell-strong">${escapeHtml(closure.label)}</span>
-          <span class="list-cell meta">${formatLocalDate(closure.startDate)} -> ${formatLocalDate(closure.endDate)}</span>
-          <span class="list-cell meta">${escapeHtml(closure.createdBy)}</span>
-          <div class="actions">
-            ${canEditData() ? `<button data-action="delete-closure" data-id="${closure.id}" class="warn">Delete</button>` : ''}
+      (closure) => {
+        const isEditing = canEditData() && state.editingClosureId === closure.id;
+        if (isEditing) {
+          return `
+            <div class="list-row list-row-closure editing" data-closure-id="${closure.id}">
+              <form class="closure-inline-form" data-closure-id="${closure.id}">
+                <label>
+                  Label
+                  <input name="label" required value="${escapeHtml(closure.label)}" />
+                </label>
+                <label>
+                  Start Date
+                  <input type="date" name="startDate" required value="${closure.startDate}" />
+                </label>
+                <label>
+                  End Date
+                  <input type="date" name="endDate" required value="${closure.endDate}" />
+                </label>
+                <div class="actions closure-inline-actions">
+                  <button type="submit" data-action="save-closure" data-id="${closure.id}" class="primary">Save</button>
+                  <button type="button" data-action="cancel-edit-closure" data-id="${closure.id}">Cancel</button>
+                </div>
+              </form>
+            </div>
+          `;
+        }
+
+        return `
+          <div class="list-row list-row-closure" data-closure-id="${closure.id}">
+            <span class="list-cell list-cell-strong">${escapeHtml(closure.label)}</span>
+            <span class="list-cell meta">${formatLocalDate(closure.startDate)} -> ${formatLocalDate(closure.endDate)}</span>
+            <span class="list-cell meta">${escapeHtml(closure.createdBy)}</span>
+            <div class="actions">
+              ${canEditData() ? `<button data-action="edit-closure" data-id="${closure.id}">Edit</button>` : ''}
+              ${canEditData() ? `<button data-action="delete-closure" data-id="${closure.id}" class="warn">Delete</button>` : ''}
+            </div>
           </div>
-        </div>
-      `
+        `;
+      }
     )
     .join('');
 };
@@ -2264,7 +2595,27 @@ const renderUtilizationTimeline = () => {
   const pinnedLeadColumnWidth = 140;
   const utilizationCellWidth = HEATMAP_DENSITY_WIDTH[state.personnelHeatmapDensity] || HEATMAP_DENSITY_WIDTH.medium;
 
-  const rowsHtml = timeline.rows
+  const visibleRows = timeline.rows.filter((row) => {
+    if (state.projectOverviewFilter === 'all') {
+      return true;
+    }
+
+    const person = state.people.find((entry) => entry.id === row.personId);
+    return person?.isActive !== false;
+  }).slice().sort((leftRow, rightRow) => {
+    const leftPerson = state.people.find((entry) => entry.id === leftRow.personId);
+    const rightPerson = state.people.find((entry) => entry.id === rightRow.personId);
+    const leftRoleLabel = state.roles.find((entry) => entry.code === leftPerson?.primaryRoleCode)?.label || leftPerson?.primaryRoleCode || '';
+    const rightRoleLabel = state.roles.find((entry) => entry.code === rightPerson?.primaryRoleCode)?.label || rightPerson?.primaryRoleCode || '';
+    const roleCompare = leftRoleLabel.localeCompare(rightRoleLabel);
+    if (roleCompare !== 0) {
+      return roleCompare;
+    }
+
+    return leftRow.personName.localeCompare(rightRow.personName);
+  });
+
+  const rowsHtml = visibleRows
     .map((row) => {
       const expanded = state.expandedPersonIds.includes(row.personId);
       const person = state.people.find((entry) => entry.id === row.personId);
@@ -2290,7 +2641,7 @@ const renderUtilizationTimeline = () => {
         <div class="utilization-data-row" data-edit-key="${buildEditKey('person', row.personId)}">
           <div class="timeline-row-label person-label utilization-fixed-cell">
             <button class="row-toggle${expanded ? ' active' : ''}" data-action="expand-person" data-id="${row.personId}" title="${expanded ? 'Collapse' : 'Edit person'}">✎</button>
-            <span class="person-label-text">${escapeHtml(row.personName)}${roleCode ? ` ${escapeHtml(`(${roleCode})`)}` : ''}</span>
+            <span class="person-label-text role-tint-pill" ${roleTintStyleAttr(roleCode)}>${escapeHtml(row.personName)}${roleCode ? ` ${escapeHtml(`(${roleCode})`)}` : ''}</span>
           </div>
           <div class="utilization-scroll-slave">
             <div class="utilization-week-strip" data-role="utilization-timeline-slave-strip" style="grid-template-columns: repeat(${headers.length}, ${utilizationCellWidth}px);">
@@ -2485,7 +2836,7 @@ const openProjectAssignmentEditor = (projectId, assignmentId = null, seedRange =
   const defaultStart = seedRange?.weekStart || defaults.startDate || fallbackWeek;
   const defaultEnd = seedRange?.weekEnd || defaults.endDate || (defaultStart ? getWeekEndIso(defaultStart) : '');
 
-  const defaultPersonId = existing?.personId || state.people[0]?.id || '';
+  const defaultPersonId = existing?.personId || activePeople()[0]?.id || '';
   const defaultPerson = state.people.find((p) => p.id === defaultPersonId);
   const defaultRoleCode = existing?.roleCode || defaultPerson?.primaryRoleCode || '';
 
@@ -2547,9 +2898,7 @@ const renderProjectAssignmentEditor = (projectId, assignmentId = null) => {
     return '';
   }
 
-  const personOptions = state.people
-    .map((p) => `<option value="${escapeHtml(p.id)}" ${p.id === editor.personId ? 'selected' : ''}>${escapeHtml(p.name)}</option>`)
-    .join('');
+  const personOptions = personOptionsForPicker(editor.personId);
 
   return `
     <form class="project-assignment-form grid three" data-project-id="${projectId}" data-assignment-id="${editor.assignmentId || ''}" data-editor-mode="${isCreateEditor ? 'create' : 'edit'}">
@@ -2615,7 +2964,7 @@ const renderProjectPersonnelDetails = (projectId, weeks, projectCellWidth) => {
         return `<div class="project-person-row project-person-editor-row">${inlineEditor}</div>`;
       }
 
-      return `<div class="project-person-row" data-edit-key="${buildEditKey('assignment', assignment.id)}"><div class="project-person-head"><strong>${escapeHtml(person?.name ?? 'Unknown Person')}</strong><span class="meta">${escapeHtml(state.roles.find((r) => r.code === assignment.roleCode)?.label ?? assignment.roleCode)} | ${formatLocalDate(assignment.startDate)} -> ${formatLocalDate(assignment.endDate)}</span><div class="actions">${canEditData() ? `<button data-action="edit-project-assignment" data-assignment-id="${assignment.id}" data-project-id="${projectId}">Edit</button><button data-action="delete-project-assignment" data-assignment-id="${assignment.id}" class="warn">Remove</button>` : ''}</div></div><div class="project-person-timeline-wrap"><div class="project-person-timeline" data-role="project-timeline-slave-strip" style="grid-template-columns: repeat(${weeks.length}, ${projectCellWidth}px);">${weekCells}</div></div></div>`;
+      return `<div class="project-person-row" data-edit-key="${buildEditKey('assignment', assignment.id)}"><div class="project-person-head"><strong class="role-tint-pill" ${roleTintStyleAttr(assignment.roleCode)}>${escapeHtml(personDisplayName(person))}</strong><span class="meta">${escapeHtml(state.roles.find((r) => r.code === assignment.roleCode)?.label ?? assignment.roleCode)} | ${formatLocalDate(assignment.startDate)} -> ${formatLocalDate(assignment.endDate)}</span><div class="actions">${canEditData() ? `<button data-action="edit-project-assignment" data-assignment-id="${assignment.id}" data-project-id="${projectId}">Edit</button><button data-action="delete-project-assignment" data-assignment-id="${assignment.id}" class="warn">Remove</button>` : ''}</div></div><div class="project-person-timeline-wrap"><div class="project-person-timeline" data-role="project-timeline-slave-strip" style="grid-template-columns: repeat(${weeks.length}, ${projectCellWidth}px);">${weekCells}</div></div></div>`;
     })
     .join('')
     : '<p class="meta">No personnel assignments attached to this project.</p>';
@@ -2643,7 +2992,8 @@ const renderProjectUtilizationTimeline = (options = {}) => {
       return false;
     }
 
-    return state.projectOverviewFilter === 'all' ? true : project.status === 'active';
+    return (state.projectOverviewFilter === 'all' ? true : project.status === 'active') &&
+      matchesPersonnelFilter(project);
   });
 
   const firstRowWeeks = visibleRows[0]?.weeks ?? [];
@@ -2659,7 +3009,7 @@ const renderProjectUtilizationTimeline = (options = {}) => {
     .map((week) => `<div class="timeline-head-cell${week.weekStart === todayWeekStart ? ' current-week' : ''}">${week.weekStart.slice(5)}</div>`)
     .join('');
 
-  const pinnedLeadColumnWidth = 192;
+  const pinnedLeadColumnWidth = state.projectTimelineLeadWidth || 192;
   const projectCellWidth = HEATMAP_DENSITY_WIDTH[state.projectHeatmapDensity] || HEATMAP_DENSITY_WIDTH.medium;
 
   const rowsHtml = visibleRows
@@ -2736,7 +3086,17 @@ const renderProjectUtilizationTimeline = (options = {}) => {
   el.projectUtilizationTimeline.innerHTML = `
     <div class="project-timeline-board" style="--project-lead-col-width: ${pinnedLeadColumnWidth}px;">
       <div class="project-timeline-header-row">
-        <div class="timeline-corner project-fixed-corner"><span class="project-expand-head">+</span><span>Project</span></div>
+        <div class="timeline-corner project-fixed-corner">
+          <span class="project-expand-head">+</span>
+          <span class="project-corner-label">Project</span>
+          <button
+            type="button"
+            class="col-resize-handle project-lead-resize-handle"
+            data-resize-target="project-timeline-lead"
+            aria-label="Resize project overview name column"
+            title="Drag to resize project name column"
+          >${RESIZE_HANDLE_ICON}</button>
+        </div>
         <div class="project-timeline-scroll-master" data-role="project-timeline-master">
           <div class="project-timeline-week-strip" style="grid-template-columns: repeat(${headers.length}, ${projectCellWidth}px);">
             ${headerHtml}
@@ -2918,12 +3278,14 @@ const loadPeople = async () => {
   state.people = await fetchJson('/api/v1/people');
   renderPeople();
   renderRoadmapProjects();
+  populatePersonnelProjectFilters();
 };
 
 const loadRoles = async () => {
   state.roles = await fetchJson('/api/v1/roles');
   renderRoles();
   renderRoadmapProjects();
+  populatePersonnelProjectFilters();
 };
 
 const loadOffices = async () => {
@@ -2954,8 +3316,6 @@ const loadCurrentUser = async () => {
   syncRoleEchoFields();
   syncAccessRequestButton();
   syncPlanningVisibility();
-  syncMappingTabVisibility();
-  syncUserManagementTabVisibility();
   syncEditingVisibility();
 };
 
@@ -3023,6 +3383,9 @@ const loadProjectUtilizationTimeline = async (weekStart, weeks) => {
 
 const loadClosures = async () => {
   state.globalClosures = await fetchJson('/api/v1/global-closures');
+  if (!state.globalClosures.some((closure) => closure.id === state.editingClosureId)) {
+    state.editingClosureId = null;
+  }
   renderClosures();
 };
 
@@ -3265,6 +3628,13 @@ const bindButtons = () => {
       return;
     }
 
+    if (target.dataset.resizeTarget === 'project-timeline-lead') {
+      event.preventDefault();
+      const measuredWidth = target.closest('.project-fixed-corner')?.getBoundingClientRect().width || state.projectTimelineLeadWidth || 192;
+      startProjectTimelineLeadResize(event.clientX, measuredWidth);
+      return;
+    }
+
     const listType = target.dataset.listType;
     const columnKey = target.dataset.colKey;
     if (!listType || !columnKey) {
@@ -3280,6 +3650,7 @@ const bindButtons = () => {
 
   el.overviewProjectsList?.addEventListener('pointerdown', onListColumnResizePointerDown);
   el.roadmapProjectsList?.addEventListener('pointerdown', onListColumnResizePointerDown);
+  el.projectUtilizationTimeline?.addEventListener('pointerdown', onListColumnResizePointerDown);
 
   el.settingsToggle.addEventListener('click', () => {
     const open = el.settingsPanel.classList.contains('hidden-view');
@@ -3293,8 +3664,17 @@ const bindButtons = () => {
   el.showProjectsView.addEventListener('click', () => setActiveView('projects', { updateHistory: true }));
   el.showPersonnelView.addEventListener('click', () => setActiveView('personnel', { updateHistory: true }));
   el.showPlanningView.addEventListener('click', () => setActiveView('planning', { updateHistory: true }));
-  el.showMappingsView.addEventListener('click', () => setActiveView('mappings', { updateHistory: true }));
-  el.showUserManagementView.addEventListener('click', () => setActiveView('users', { updateHistory: true }));
+  el.adminSubtabs?.addEventListener('click', (event) => {
+    const target = event.target instanceof HTMLElement ? event.target.closest('button[data-admin-subtab]') : null;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
+    const subView = target.dataset.adminSubtab || 'templates';
+    if (state.activeView !== 'planning') {
+      setActiveView('planning', { updateHistory: true });
+    }
+    setActiveAdminSubView(subView);
+  });
   el.refreshAll.addEventListener('click', refreshAll);
   if (el.themeToggle) {
     el.themeToggle.addEventListener('click', () => {
@@ -3504,6 +3884,34 @@ const bindButtons = () => {
     }
   });
 
+  el.projectsOverviewStatusFilter?.addEventListener('click', async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement) || !target.dataset.projectFilter) {
+      return;
+    }
+
+    try {
+      await setProjectOverviewFilter(target.dataset.projectFilter);
+      log('Project overview filter updated', { filter: state.projectOverviewFilter });
+    } catch (error) {
+      log('Update project overview filter failed', error);
+    }
+  });
+
+  el.roadmapOverviewStatusFilter?.addEventListener('click', async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement) || !target.dataset.projectFilter) {
+      return;
+    }
+
+    try {
+      await setProjectOverviewFilter(target.dataset.projectFilter);
+      log('Project overview filter updated', { filter: state.projectOverviewFilter });
+    } catch (error) {
+      log('Update project overview filter failed', error);
+    }
+  });
+
   el.personnelOverviewStatusFilter?.addEventListener('click', async (event) => {
     const target = event.target;
     if (!(target instanceof HTMLButtonElement) || !target.dataset.projectFilter) {
@@ -3517,6 +3925,38 @@ const bindButtons = () => {
       log('Update project overview filter failed', error);
     }
   });
+
+  const onPersonnelProjectFilterChange = async (event) => {
+    state.personnelProjectFilter = event.target instanceof HTMLSelectElement ? event.target.value : '';
+    [el.heatmapPersonnelFilter, el.roadmapPersonnelFilter].forEach((select) => {
+      if (!select) {
+        return;
+      }
+      if (select !== event.target) {
+        select.value = state.personnelProjectFilter;
+      }
+
+      const selected = select.selectedOptions?.[0];
+      const roleCode = selected?.dataset.roleCode || '';
+      select.classList.toggle('is-role-tinted', Boolean(roleCode));
+      select.style.cssText = roleCode ? roleTintInlineStyle(roleCode) : '';
+    });
+    renderProjects();
+    renderRoadmapProjects();
+    state.overviewAnalyticsDirty = true;
+    if (!viewNeedsOverviewAnalytics()) {
+      return;
+    }
+    try {
+      await refreshOverviewAnalytics();
+      state.overviewAnalyticsDirty = false;
+    } catch (error) {
+      log('Personnel project filter analytics refresh failed', error);
+    }
+  };
+
+  el.heatmapPersonnelFilter?.addEventListener('change', onPersonnelProjectFilterChange);
+  el.roadmapPersonnelFilter?.addEventListener('change', onPersonnelProjectFilterChange);
 
   el.templatesList.addEventListener('click', async (event) => {
     const target = event.target;
@@ -3629,6 +4069,57 @@ const bindButtons = () => {
       return;
     }
 
+    if (target.dataset.action === 'edit-closure' && target.dataset.id) {
+      if (!ensureEditable()) {
+        return;
+      }
+      state.editingClosureId = target.dataset.id;
+      renderClosures();
+      const editingForm = el.closuresList.querySelector('.closure-inline-form');
+      editingForm?.querySelector('input[name="label"]')?.focus();
+      return;
+    }
+
+    if (target.dataset.action === 'cancel-edit-closure') {
+      state.editingClosureId = null;
+      renderClosures();
+      return;
+    }
+
+    if (target.dataset.action === 'save-closure' && target.dataset.id) {
+      if (!ensureEditable()) {
+        return;
+      }
+      const form = target.closest('form');
+      if (!(form instanceof HTMLFormElement)) {
+        return;
+      }
+
+      const formData = new FormData(form);
+      const payload = {
+        label: String(formData.get('label') || '').trim(),
+        startDate: String(formData.get('startDate') || ''),
+        endDate: String(formData.get('endDate') || '')
+      };
+
+      try {
+        const data = await fetchJson(`/api/v1/global-closures/${target.dataset.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload)
+        });
+        state.editingClosureId = null;
+        log('Global closure updated', data);
+        await Promise.all([
+          loadClosures(),
+          loadProjects(),
+          refreshOverviewAnalytics()
+        ]);
+      } catch (error) {
+        log('Update closure failed', error);
+      }
+      return;
+    }
+
     if (target.dataset.action === 'delete-closure' && target.dataset.id) {
       if (!ensureEditable()) {
         return;
@@ -3652,6 +4143,19 @@ const bindButtons = () => {
       } catch (error) {
         log('Delete closure failed', error);
       }
+    }
+  });
+
+  el.closuresList.addEventListener('submit', async (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement) || !form.classList.contains('closure-inline-form')) {
+      return;
+    }
+
+    event.preventDefault();
+    const submitButton = form.querySelector('button[data-action="save-closure"]');
+    if (submitButton instanceof HTMLButtonElement) {
+      submitButton.click();
     }
   });
 
@@ -3800,6 +4304,7 @@ const bindButtons = () => {
       office: String(data.get('office') || '').trim(),
       weeklyCapacityHours: Number(data.get('weeklyCapacityHours')),
       workingDays: getWorkingDays(String(data.get('workingDays') || '')),
+      isActive: String(data.get('isActive') || 'true') === 'true',
       expectedUpdatedAt: String(data.get('expectedUpdatedAt') || '') || undefined
     };
     try {
@@ -3832,6 +4337,7 @@ const bindButtons = () => {
       office: String(data.get('office') || '').trim(),
       weeklyCapacityHours: Number(data.get('weeklyCapacityHours')),
       workingDays: getWorkingDays(String(data.get('workingDays') || '')),
+      isActive: String(data.get('isActive') || 'true') === 'true',
       expectedUpdatedAt: String(data.get('expectedUpdatedAt') || '') || undefined
     };
     try {
@@ -4492,8 +4998,6 @@ setHeatmapDensity(localStorage.getItem(HEATMAP_DENSITY_KEY));
 setPersonnelDensity(localStorage.getItem(PERSONNEL_DENSITY_KEY));
 syncProjectOverviewFilterButtons();
 syncPlanningVisibility();
-syncMappingTabVisibility();
-syncUserManagementTabVisibility();
 syncAccessRequestButton();
 syncEditingVisibility();
 
