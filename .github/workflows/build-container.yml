@@ -1,0 +1,19 @@
+name: Build Container (Manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t projection-app:manual-${{ github.sha }} .
+
+      - name: Show built images
+        run: docker images | grep projection-app

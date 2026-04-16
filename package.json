@@ -6,8 +6,14 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "npm run build && node dist/server.js",
+    "build": "npm run build:app && npm run compose:up",
+    "build:app": "tsc -p tsconfig.json",
+    "docker:build": "docker build -t projection-app:latest .",
+    "docker:recreate": "node scripts/docker-recreate.mjs",
+    "compose:up": "docker compose up -d --build",
+    "compose:down": "docker compose down",
+    "compose:logs": "docker compose logs -f projection",
+    "start": "npm run build:app && node dist/server.js",
     "check": "tsc --noEmit",
     "import:xlsx": "tsx src/scripts/import-xlsx.ts"
   },

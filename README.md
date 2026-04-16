@@ -66,6 +66,73 @@ Additionally, all workbook sheets are stored raw in SQLite table legacy_workbook
 - Subsequent API and UI changes persist across restarts.
 - Workbook import snapshots are also persisted in table legacy_workbook_sheets.
 
+## Docker Build And Data Persistence
+
+- Yes: the SQLite database should stay outside the container so data survives rebuild/redeploy.
+- This repo now mounts host folder `data/` into container path `/app/data`.
+- Since the app uses `/app/data/projection.sqlite` in container, DB state persists as long as host `data/` remains.
+
+Build app and recreate Docker container in one command:
+
+  npm run build
+
+Compose commands:
+
+- Build and run with persistent data mount:
+
+  npm run compose:up
+
+- Stop and remove container:
+
+  npm run compose:down
+
+- Follow runtime logs:
+
+  npm run compose:logs
+
+Direct Docker scripts:
+
+- Build image only:
+
+  npm run docker:build
+
+- Build image and recreate running container with mounted data directory:
+
+  npm run docker:recreate
+
+Compose file:
+
+- `compose.yaml` defines service `projection` with `./data:/app/data` bind mount, so SQLite data survives container rebuild/redeploy.
+
+Defaults used by `docker:recreate`:
+
+- Image: `projection-app:latest`
+- Container: `projection-app`
+- Port mapping: `${DOCKER_HOST_PORT:-PORT}:${PORT}`
+- Volume: `./data:/app/data`
+
+Optional environment overrides:
+
+- `DOCKER_IMAGE` to change image tag
+- `DOCKER_CONTAINER` to change container name
+- `DOCKER_HOST_PORT` to change exposed host port
+
+## GitHub Actions (Manual Only)
+
+Pushes no longer trigger automatic build/deploy.
+
+Use GitHub Actions -> Run workflow manually:
+
+- `Build Container (Manual)`:
+  - Builds the Docker image in GitHub Actions only.
+  - Does not deploy.
+
+- `Deploy Container (Manual)`:
+  - Connects to server over SSH.
+  - Pulls latest `main`.
+  - Runs `docker compose up -d --build` in deploy path.
+  - Keeps DB data persisted through `./data:/app/data` mount.
+
 ## UI Features
 
 The web UI is served from the same app and lets you:

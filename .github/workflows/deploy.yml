@@ -1,33 +1,16 @@
-name: Deploy
+name: Deploy Container (Manual)
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:  # allows triggering manually from the GitHub UI
+  workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  deploy-container:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Type-check
-        run: npm run check
-
-      - name: Build
-        run: npm run build
 
       - name: Deploy to server
         uses: appleboy/ssh-action@v1
@@ -43,13 +26,10 @@ jobs:
             echo "--- Pulling latest code ---"
             git pull --ff-only origin main
 
-            echo "--- Installing production dependencies ---"
-            npm ci --omit=dev
+            echo "--- Building and (re)starting container ---"
+            docker compose up -d --build
 
-            echo "--- Building ---"
-            npm run build
-
-            echo "--- Reloading app process ---"
-            pm2 reload ${{ secrets.PM2_APP_NAME || 'projection' }} --update-env
+            echo "--- Container status ---"
+            docker compose ps
 
             echo "--- Done ---"

@@ -1,0 +1,17 @@
+services:
+  projection:
+    image: ${DOCKER_IMAGE:-projection-app:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ${DOCKER_CONTAINER:-projection-app}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: ${PORT:-3000}
+    ports:
+      - "${DOCKER_HOST_PORT:-3000}:${PORT:-3000}"
+    volumes:
+      - ./data:/app/data
